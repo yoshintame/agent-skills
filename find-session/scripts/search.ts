@@ -27,10 +27,11 @@ type Args = {
   bm25: boolean;
   full: boolean;
   rebuild: boolean;
+  noFold: boolean;
 };
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { synonyms: [], limit: 40, sessions: false, link: false, noStem: false, showSql: false, distinct: false, bm25: false, full: false, rebuild: false };
+  const a: Args = { synonyms: [], limit: 40, sessions: false, link: false, noStem: false, showSql: false, distinct: false, bm25: false, full: false, rebuild: false, noFold: false };
   for (const t of argv) {
     if (t === "--sessions") a.sessions = true;
     else if (t === "--link" || t === "--resume") { a.sessions = true; a.link = true; }
@@ -40,6 +41,7 @@ function parseArgs(argv: string[]): Args {
     else if (t === "--bm25") a.bm25 = true;
     else if (t === "--full") { a.full = true; a.bm25 = true; }
     else if (t === "--rebuild") { a.rebuild = true; a.bm25 = true; }
+    else if (t === "--no-fold") a.noFold = true;
     else if (t.startsWith("--kind=")) a.kind = t.slice(7);
     else if (t.startsWith("--tool=")) { a.tool = t.slice(7); a.kind ??= "tool_use"; }
     else if (t.startsWith("--project=")) a.project = t.slice(10);
@@ -50,7 +52,7 @@ function parseArgs(argv: string[]): Args {
     else a.synonyms.push(t);
   }
   if (a.synonyms.length === 0) {
-    console.error('usage: search.ts "<words>" [...] [--bm25 [--full] [--rebuild]] [--kind=K] [--tool=NAME] [--project=SLUG] [--since=DATE] [--until=DATE] [--sessions] [--link] [--distinct] [--limit=N] [--no-stem] [--sql]');
+    console.error('usage: search.ts "<words>" [...] [--bm25 [--full] [--rebuild] [--no-fold]] [--kind=K] [--tool=NAME] [--project=SLUG] [--since=DATE] [--until=DATE] [--sessions] [--link] [--distinct] [--limit=N] [--no-stem] [--sql]');
     console.error('       open-session.ts <session-id>   # actually open it, in a window on its own cwd');
     process.exit(2);
   }
@@ -183,7 +185,7 @@ if (args.bm25) {
          FROM keyed)
        SELECT project, session_id, round(score, 2) AS score, round(total, 2) AS total, hits, forks,
          first_seen, last_seen, '${DEEP_LINK}' || session_id AS link
-       FROM folded WHERE rn = 1 ORDER BY score DESC LIMIT ${args.limit};`
+       FROM folded${args.noFold ? "" : " WHERE rn = 1"} ORDER BY score DESC LIMIT ${args.limit};`
     : `LOAD fts;
        SELECT ts::date AS dt, project,${needsMsg ? " kind, tool," : ""} round(score, 2) AS score,
          left(regexp_replace(text, '\\s+', ' ', 'g'), 160) AS snippet
