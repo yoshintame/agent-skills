@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Fetch a YouTube video's transcript and metadata via yt-dlp.
+
+Usage:
+    yt-transcript <url-or-id> [--json] [--langs en,ru]
+
+Without --json: human-readable metadata header followed by the transcript.
+With --json: a single JSON object with the fields plus a `transcript` string.
+
+Exit codes: 0 ok, 1 bad usage / yt-dlp error, 2 no usable subtitles found.
+"""
+import sys
+import os
+import re
+import json
+import html
+import glob
+import tempfile
+import subprocess
+
+DEFAULT_LANGS = ["en-orig", "en", "ru-orig", "ru"]
+
+
+def die(msg, code=1):
+    print(f"yt-transcript: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def run(args):
+    try:
+        return subprocess.run(args, capture_output=True, text=True)
+    except FileNotFoundError:
+        die("yt-dlp is not installed or not on PATH")
+
+
+def get_meta(url):
+    fmt = ("%(.{id,title,channel,uploader,duration,upload_date,"
+           "thumbnail,webpage_url})j")
+    r = run(["yt-dlp", "--skip-download", "--no-warnings", "--print", fmt, url])
+    out = (r.stdout or "").strip()
+    if r.returncode != 0 or not out:
+        die("could not read video metadata\n" + (r.stderr.strip() or ""))
+    return json.loads(out.splitlines()[0])
+
+
+def fetch_subs(url, tmp, langs, auto):
+    flag = "--write-auto-subs" if auto else "--write-subs"
+    run(["yt-dlp", "--skip-download", "--no-warnings", "--ignore-errors",
+         flag, "--sub-langs", ",".join(langs), "--sub-format", "vtt",
+         "-o", os.path.join(tmp, "%(id)s.%(ext)s"), url])
+    return sorted(glob.glob(os.path.join(tmp, "*.vtt")))
+
+
+def pick(files, langs):
+    def rank(path):
+        m = re.search(r"\.([\w-]+)\.vtt$", os.path.basename(path))
+        lang = m.group(1) if m else ""
+        return langs.index(lang) if lang in langs else len(langs)
+    return sorted(files, key=rank)[0]
+
+
+def lang_of(path):
+    m = re.search(r"\.([\w-]+)\.vtt$", os.path.basename(path))
+    return m.group(1) if m else "?"
+
+
+def clean_vtt(text):
+    cues, cur = [], []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            if cur:
+                cues.append(cur)
+                cur = []
+            continue
+        if s.startswith(("WEBVTT", "Kind:", "Language:", "NOTE")):
+            continue
+        if "-->" in s or re.fullmatch(r"\d+", s):
+            continue
+        cur.append(s)
+    if cur:
+        cues.append(cur)
+
+    tagged = [ln for cue in cues for ln in cue
+              if re.search(r"<\d\d:\d\d:\d\d", ln) or "<c>" in ln]
+    raw = tagged if tagged else [ln for cue in cues for ln in cue]
+
+    out = []
+    for ln in raw:
+        s = html.unescape(re.sub(r"<[^>]+>", "", ln)).strip()
+        s = re.sub(r"\s+", " ", s)
+        if s and (not out or out[-1] != s):
+            out.append(s)
+    return " ".join(out)
+
+
+def main():
+    args = [a for a in sys.argv[1:]]
+    as_json = "--json" in args
+    args = [a for a in args if a != "--json"]
+    langs = DEFAULT_LANGS
+    if "--langs" in args:
+        i = args.index("--langs")
+        try:
+            langs = [x.strip() for x in args[i + 1].split(",") if x.strip()]
+            del args[i:i + 2]
+        except IndexError:
+            die("--langs needs a value, e.g. --langs en,ru")
+    if len(args) != 1:
+        die("usage: yt-transcript <url-or-id> [--json] [--langs en,ru]")
+    url = args[0]
+
+    meta = get_meta(url)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        files = fetch_subs(url, tmp, langs, auto=False)
+        kind = "manual"
+        if not files:
+            files = fetch_subs(url, tmp, langs, auto=True)
+            kind = "auto-generated"
+        if not files:
+            die(f"no {'/'.join(langs)} subtitles available for this video; "
+                f"try --langs with another code", code=2)
+        chosen = pick(files, langs)
+        sub_lang = lang_of(chosen)
+        with open(chosen, encoding="utf-8") as fh:
+            transcript = clean_vtt(fh.read())
+
+    if not transcript:
+        die("subtitle file was empty after cleaning", code=2)
+
+    secs = meta.get("duration") or 0
+    record = {
+        "id": meta.get("id"),
+        "title": meta.get("title"),
+        "channel": meta.get("channel") or meta.get("uploader"),
+        "url": meta.get("webpage_url"),
+        "thumbnail": meta.get("thumbnail"),
+        "duration_seconds": secs,
+        "duration_minutes": round(secs / 60) if secs else None,
+        "published": _date(meta.get("upload_date")),
+        "subtitle_lang": sub_lang,
+        "subtitle_kind": kind,
+        "transcript": transcript,
+    }
+
+    if as_json:
+        json.dump(record, sys.stdout, ensure_ascii=False, indent=2)
+        print()
+        return
+
+    for key in ("title", "channel", "url", "published"):
+        print(f"{key}: {record[key]}")
+    print(f"duration: {record['duration_minutes']} min")
+    print(f"subtitles: {sub_lang} ({kind})")
+    print()
+    print(transcript)
+
+
+def _date(yyyymmdd):
+    if yyyymmdd and re.fullmatch(r"\d{8}", yyyymmdd):
+        return f"{yyyymmdd[:4]}-{yyyymmdd[4:6]}-{yyyymmdd[6:]}"
+    return None
+
+
+if __name__ == "__main__":
+    main()
