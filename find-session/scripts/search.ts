@@ -15,6 +15,9 @@ type Args = {
   synonyms: string[];
   kind?: string;
   tool?: string;
+  project?: string;
+  since?: string;
+  until?: string;
   limit: number;
   sessions: boolean;
   link: boolean;
@@ -39,17 +42,22 @@ function parseArgs(argv: string[]): Args {
     else if (t === "--rebuild") { a.rebuild = true; a.bm25 = true; }
     else if (t.startsWith("--kind=")) a.kind = t.slice(7);
     else if (t.startsWith("--tool=")) { a.tool = t.slice(7); a.kind ??= "tool_use"; }
+    else if (t.startsWith("--project=")) a.project = t.slice(10);
+    else if (t.startsWith("--since=")) a.since = t.slice(8);
+    else if (t.startsWith("--until=")) a.until = t.slice(8);
     else if (t.startsWith("--limit=")) a.limit = Math.max(1, parseInt(t.slice(8), 10) || 40);
     else if (t.startsWith("--")) { console.error(`unknown flag: ${t}`); process.exit(2); }
     else a.synonyms.push(t);
   }
   if (a.synonyms.length === 0) {
-    console.error('usage: search.ts "<words>" [...] [--bm25 [--full] [--rebuild]] [--kind=K] [--tool=NAME] [--sessions] [--link] [--distinct] [--limit=N] [--no-stem] [--sql]');
+    console.error('usage: search.ts "<words>" [...] [--bm25 [--full] [--rebuild]] [--kind=K] [--tool=NAME] [--project=SLUG] [--since=DATE] [--until=DATE] [--sessions] [--link] [--distinct] [--limit=N] [--no-stem] [--sql]');
     console.error('       open-session.ts <session-id>   # actually open it, in a window on its own cwd');
     process.exit(2);
   }
   return a;
 }
+
+const sq = (s: string): string => s.replace(/'/g, "''");
 
 const tokenize = (phrase: string): string[] =>
   phrase.toLowerCase().split(/[^\p{L}\p{N}]+/u)
@@ -80,8 +88,20 @@ const args = parseArgs(Bun.argv.slice(2));
 
 // ─── BM25 path: ranked shortlist over a persistent snapshot + FTS index ───
 if (args.bm25) {
-  const table = args.full ? "msg_cache" : "me_cache";
-  const q = args.synonyms.join(" ").replace(/'/g, "''");
+  // --kind/--tool need the tool columns, which only msg_cache carries.
+  const needsMsg = args.full || !!args.kind || !!args.tool;
+  const table = needsMsg ? "msg_cache" : "me_cache";
+  const q = sq(args.synonyms.join(" "));
+
+  // Metadata filters live OUTSIDE match_bm25 so IDF stays global (rare terms
+  // stay rare); candidates are just restricted to the slice afterwards.
+  const filters: string[] = [];
+  if (args.project) filters.push(`project ILIKE '%${sq(args.project)}%'`);
+  if (args.since) filters.push(`ts::date >= '${sq(args.since)}'`);
+  if (args.until) filters.push(`ts::date <= '${sq(args.until)}'`);
+  if (args.kind && needsMsg) filters.push(`kind = '${sq(args.kind)}'`);
+  if (args.tool && needsMsg) filters.push(`tool = '${sq(args.tool)}'`);
+  const filterSql = filters.length ? ` AND ${filters.join(" AND ")}` : "";
 
   // The JSON reader's buffers don't spill to disk: one CTAS over the full glob
   // OOMs on a large corpus regardless of memory_limit. Scan in bounded batches
@@ -104,14 +124,30 @@ if (args.bm25) {
   };
 
   const build = () => {
-    const src = args.full ? "msg_src" : "me_src";
     const parts = fileBatches(128 * 1024 * 1024);
-    console.error(`bm25: building ${table} via ${src} (chunked scan, ${parts.length} batches)…`);
-    const b0 = duck(`CREATE OR REPLACE TABLE ${table}(project VARCHAR, session_id VARCHAR, ts VARCHAR, text VARCHAR);`, { db: DB });
+    console.error(`bm25: building ${table} (cleaned + fork-deduped, chunked scan, ${parts.length} batches)…`);
+    const ddl = needsMsg
+      ? `CREATE OR REPLACE TABLE ${table}(project VARCHAR, session_id VARCHAR, ts VARCHAR, kind VARCHAR, tool VARCHAR, text VARCHAR);`
+      : `CREATE OR REPLACE TABLE ${table}(project VARCHAR, session_id VARCHAR, ts VARCHAR, text VARCHAR);`;
+    const b0 = duck(ddl, { db: DB });
     if (!b0.ok) { process.stderr.write(b0.err); process.exit(1); }
     for (let i = 0; i < parts.length; i++) {
-      const list = parts[i].map((p) => `'${p.replace(/'/g, "''")}'`).join(",");
-      const b1 = duck(`INSERT INTO ${table} SELECT project, session_id, ts, text FROM ${src}([${list}]);`, { init: true, db: DB });
+      const list = parts[i].map((p) => `'${sq(p)}'`).join(",");
+      // index_text() cleans prose and tool_use, drops tool_result/self-tooling;
+      // GROUP BY (session, text) collapses byte-identical branch copies so a
+      // common parentUuid prefix stops inflating term frequency.
+      const ins = needsMsg
+        ? `INSERT INTO ${table}
+             SELECT project, session_id, min(ts) AS ts, any_value(kind) AS kind, any_value(tool) AS tool, txt
+             FROM (SELECT project, session_id, ts, kind, tool, index_text(kind, text) AS txt FROM msg_src([${list}]))
+             WHERE txt IS NOT NULL AND length(txt) > 0
+             GROUP BY project, session_id, txt;`
+        : `INSERT INTO ${table}
+             SELECT project, session_id, min(ts) AS ts, txt
+             FROM (SELECT project, session_id, ts, nullif(strip_injections(text), '') AS txt FROM me_src([${list}]))
+             WHERE txt IS NOT NULL AND length(txt) > 0
+             GROUP BY project, session_id, txt;`;
+      const b1 = duck(ins, { init: true, db: DB });
       if (!b1.ok) { process.stderr.write(b1.err); process.exit(1); }
       console.error(`  batch ${i + 1}/${parts.length}`);
     }
@@ -128,23 +164,36 @@ if (args.bm25) {
   };
 
   const scored = `SELECT *, fts_main_${table}.match_bm25(id, '${q}') AS score FROM ${table}`;
+  // Inter-file fork fold: clones of one conversation share their peak (top-scoring)
+  // message, so md5(peak) groups them; keep the best-scoring/latest, count the rest
+  // as `forks`. Short generic peaks fall back to session_id so distinct sessions
+  // that merely share a "продолжай" don't collapse into one.
   const querySql = args.sessions
     ? `LOAD fts;
-       SELECT project, session_id, round(max(score), 2) AS score, round(sum(score), 2) AS total, count(*) AS hits,
-         min(ts)::date AS first_seen, max(ts)::date AS last_seen,
-         '${DEEP_LINK}' || session_id AS link
-       FROM (${scored}) s WHERE score IS NOT NULL
-       GROUP BY project, session_id ORDER BY score DESC LIMIT ${args.limit};`
+       WITH scored AS (${scored}),
+       hit AS (SELECT * FROM scored WHERE score IS NOT NULL${filterSql}),
+       per_session AS (
+         SELECT project, session_id, max(score) AS score, sum(score) AS total, count(*) AS hits,
+           min(ts)::date AS first_seen, max(ts)::date AS last_seen, arg_max(text, score) AS peak
+         FROM hit GROUP BY project, session_id),
+       keyed AS (SELECT *, md5(CASE WHEN length(peak) >= 40 THEN peak ELSE session_id END) AS fk FROM per_session),
+       folded AS (
+         SELECT *, count(*) OVER (PARTITION BY fk) - 1 AS forks,
+           row_number() OVER (PARTITION BY fk ORDER BY score DESC, last_seen DESC) AS rn
+         FROM keyed)
+       SELECT project, session_id, round(score, 2) AS score, round(total, 2) AS total, hits, forks,
+         first_seen, last_seen, '${DEEP_LINK}' || session_id AS link
+       FROM folded WHERE rn = 1 ORDER BY score DESC LIMIT ${args.limit};`
     : `LOAD fts;
-       SELECT ts::date AS dt, project, round(score, 2) AS score,
+       SELECT ts::date AS dt, project,${needsMsg ? " kind, tool," : ""} round(score, 2) AS score,
          left(regexp_replace(text, '\\s+', ' ', 'g'), 160) AS snippet
-       FROM (${scored}) s WHERE score IS NOT NULL ORDER BY score DESC LIMIT ${args.limit};`;
+       FROM (${scored}) s WHERE score IS NOT NULL${filterSql} ORDER BY score DESC LIMIT ${args.limit};`;
 
   if (args.showSql) { console.log(querySql); process.exit(0); }
 
   if (args.rebuild) build();
   let r = duck(querySql, { db: DB });
-  if (!r.ok && /does not exist|Catalog Error|fts_main_/i.test(r.err)) { build(); r = duck(querySql, { db: DB }); }
+  if (!r.ok && /does not exist|Catalog Error|fts_main_|Binder Error|Referenced column/i.test(r.err)) { build(); r = duck(querySql, { db: DB }); }
 
   const meta = duck(`SELECT count(*), max(ts)::date FROM ${table};`, { db: DB, csv: true }).out.trim().split(",");
   console.error(`bm25 ${table} rows=${meta[0] ?? "?"} newest=${meta[1] ?? "?"} (reuse; --rebuild to refresh)\nq: ${args.synonyms.join(" ")}`);
@@ -163,8 +212,11 @@ if (clauses.length === 0) { console.error("all synonyms reduced to stopwords"); 
 
 const view = args.kind && args.kind !== "user" ? "msg" : "me";
 const where = [`(${clauses.join(") OR (")})`];
-if (args.kind && view === "msg") where.push(`m.kind = '${args.kind}'`);
-if (args.tool) where.push(`m.tool = '${args.tool}'`);
+if (args.kind && view === "msg") where.push(`m.kind = '${sq(args.kind)}'`);
+if (args.tool) where.push(`m.tool = '${sq(args.tool)}'`);
+if (args.project) where.push(`m.project ILIKE '%${sq(args.project)}%'`);
+if (args.since) where.push(`m.ts::date >= '${sq(args.since)}'`);
+if (args.until) where.push(`m.ts::date <= '${sq(args.until)}'`);
 
 // dedup key: strip <ide_selection> block (dotall) + collapse whitespace
 const NORM = "regexp_replace(regexp_replace(m.text, '<ide_selection>.*?</ide_selection>', '', 'gs'), '\\s+', ' ', 'g')";
