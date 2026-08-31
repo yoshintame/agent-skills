@@ -15,7 +15,7 @@ description: Reconstruct a stale or paused AI session. Read-only.
    ```
    bun ~/.claude/skills/session-status/scripts/session-status.ts [session-id]
    ```
-   Без аргумента — последняя сессия в `cwd`; полный UUID — конкретная. Выдаёт готовые секции `Documentation`, `Code (commits)`, `Staleness vs HEAD`, `Non-git / scratch`.
+   Без аргумента — последняя сессия в `cwd`; полный UUID — конкретная. Выдаёт готовые секции `Documentation`, `Code (commits)`, `Staleness vs HEAD`, `Non-git / scratch`. Шапка несёт отметку снятия — `Reconstructed as-of` (wall-clock) + `HEAD at snapshot` по репо: это снимок на конкретный момент, перенеси отметку в итог; если пишешь отчёт в возобновлённой сессии позже отметки — перегони скрипт, git мог уйти вперёд. Файлы переименованного региона (переехавший checkout, залинкованная папка) помечаются `moved → <новый путь>`, а не `deleted?`; уцелевший переезд — не потеря.
 
 2. Перечитать **только** файлы с пометкой `re-read needed`. Для каждого: `git -C <repo> diff <hash> HEAD -- <file>` → точная дельта (какие frontmatter-поля / секции / строки изменил поздний коммит и что там теперь — не «файл изменён») + жив ли твой контент. `BYTE-IDENTICAL` не перечитывай — сверни в одну сводную строку.
 
@@ -27,6 +27,7 @@ description: Reconstruct a stale or paused AI session. Read-only.
 
 ```
 ## Session <short-id>
+_снято: <as-of из шапки скрипта> · HEAD <репо>@<hash> — снимок на этот момент; позже перегони_
 
 ### Что сделано
 - <глагол + результат, 1 строка>
@@ -66,5 +67,7 @@ description: Reconstruct a stale or paused AI session. Read-only.
 - `Non-git / scratch` из вывода скрипта в «Файлы» не тащи; если важно (throwaway-путь, тестовый артефакт) — в «Полезное».
 - Пустую под-секцию пропусти.
 - Чужая сессия (UUID, не помнишь контекст): «Что сделано»/«Полезное» инферируй из subject'ов коммитов и путей; если синтез невозможен — флагни и предложи `claude --resume <UUID>`.
+
+**Резюм и sandbox.** Когда скрипт гоняется headless внутри целевой сессии (`claude -p --resume <UUID> "/session-status"`), дозапись нарратива идёт в `~/.claude/projects/**` — а он в write-deny песочницы, заход упадёт `EPERM`: гони с `dangerouslyDisableSandbox: true` (`claude`/`bun` в allowlist, лишнего промпта не будет). Резюм резолвит сессию по slug **текущего** cwd и не имеет флага cwd: если транскрипт лежит в чужом slug — оберни в `(cd <slug-как-путь> && claude --resume … )` (санкционированное исключение из «никогда `cd`») либо предварительно залинкуй его в свой slug через `session-link`.
 
 Reference: `$OBSIDIAN_VAULT/projects/vault-ai-management/analysis/extraction-framework.md` § `/session-status`

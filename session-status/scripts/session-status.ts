@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { existsSync, statSync } from "node:fs"
+import { existsSync, readdirSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, extname, join, relative } from "node:path"
 import $ from "dax-sh"
@@ -166,6 +166,81 @@ async function gitToplevel(fileDir: string): Promise<string | null> {
   return top
 }
 
+const HOMEDIR = homedir()
+function tildify(p: string): string {
+  return p === HOMEDIR || p.startsWith(`${HOMEDIR}/`) ? `~${p.slice(HOMEDIR.length)}` : p
+}
+
+const readdirCache = new Map<string, string[]>()
+function readdirCached(dir: string): string[] {
+  const cached = readdirCache.get(dir)
+  if (cached) return cached
+  let entries: string[]
+  try {
+    entries = readdirSync(dir)
+  } catch {
+    entries = []
+  }
+  readdirCache.set(dir, entries)
+  return entries
+}
+
+const renameMapCache = new Map<string, Map<string, string>>()
+async function repoRenameMap(repo: string): Promise<Map<string, string>> {
+  const cached = renameMapCache.get(repo)
+  if (cached) return cached
+  const m = new Map<string, string>()
+  const res = await $`git -C ${repo} log -M --diff-filter=R --name-status --format=`.noThrow().stdout("piped").stderr("null")
+  if (res.code === 0) {
+    for (const raw of res.stdout.split("\n")) {
+      if (raw[0] !== "R") continue
+      const parts = raw.split("\t")
+      if (parts.length >= 3 && !m.has(parts[1])) m.set(parts[1], parts[2])
+    }
+  }
+  renameMapCache.set(repo, m)
+  return m
+}
+
+function followRename(map: Map<string, string>, oldRel: string): string | null {
+  let cur = oldRel
+  const seen = new Set([oldRel])
+  while (map.has(cur)) {
+    cur = map.get(cur)!
+    if (seen.has(cur)) break
+    seen.add(cur)
+  }
+  return cur === oldRel ? null : cur
+}
+
+async function resolveMoved(absOld: string): Promise<string | null> {
+  const base = nearestExistingDir(dirname(absOld))
+  const segs = relative(base, absOld).split("/")
+  if (segs.length >= 2) {
+    const tail = segs.slice(1).join("/")
+    let hit: string | null = null
+    let hits = 0
+    for (const name of readdirCached(base)) {
+      if (name === segs[0]) continue
+      const cand = join(base, name, tail)
+      if (existsSync(cand)) {
+        hit = cand
+        if (++hits > 1) break
+      }
+    }
+    if (hits === 1) return hit
+  }
+  const repo = await gitToplevel(dirname(absOld))
+  if (repo) {
+    const newRel = followRename(await repoRenameMap(repo), relative(repo, absOld))
+    if (newRel) {
+      const cand = join(repo, newRel)
+      if (existsSync(cand)) return cand
+    }
+  }
+  return null
+}
+
 async function gitLogDatesForAdd(repo: string, relpath: string): Promise<number[]> {
   const res = await $`git -C ${repo} log --diff-filter=A --format=%cI -- ${relpath}`.noThrow().stdout("piped").stderr("null")
   if (res.code !== 0) return []
@@ -202,6 +277,13 @@ async function gitCommitFiles(repo: string, hash: string): Promise<string[]> {
   const res = await $`git -C ${repo} show --name-only --format= ${hash}`.noThrow().stdout("piped").stderr("null")
   if (res.code !== 0) return []
   return res.stdout.split("\n").map((l) => l.trim()).filter(Boolean)
+}
+
+async function gitHead(repo: string): Promise<string> {
+  const res = await $`git -C ${repo} log -1 --format=%h%x09%cs%x09%s`.noThrow().stdout("piped").stderr("null")
+  if (res.code !== 0) return "unknown"
+  const [hash, date, subject] = res.stdout.trim().split("\t")
+  return `${hash} (${date}) \`${(subject ?? "").slice(0, 60)}\``
 }
 
 function keyPaths(relpaths: string[]): string[] {
@@ -241,6 +323,7 @@ type FileModel = {
   cls: FileClass
   action: string
   lastTouch: string
+  movedTo: string | null
 }
 
 function line(s = ""): string {
@@ -283,16 +366,29 @@ async function report(sessionIdArg: string | null): Promise<string | null> {
     const cls = classify(abs)
     const deleted = !existsSync(abs)
     const wasWritten = info.tools.has("Write")
-    const action = await fileAction({ abs, repo, relpath, wasWritten, deleted, startMs })
-    files.push({ abs, repo, relpath, cls, action, lastTouch: info.lastTouch })
+    const movedTo = deleted ? await resolveMoved(abs) : null
+    const action = movedTo
+      ? `moved → ${tildify(movedTo)}`
+      : await fileAction({ abs, repo, relpath, wasWritten, deleted, startMs })
+    files.push({ abs, repo, relpath, cls, action, lastTouch: info.lastTouch, movedTo })
   }
   files.sort((a, b) => a.abs.localeCompare(b.abs))
 
   const repos = [...new Set(files.map((f) => f.repo).filter((r): r is string => r !== null))]
+  const stampRepos = new Set(repos)
+  for (const f of files) {
+    if (!f.movedTo) continue
+    const r = await gitToplevel(dirname(f.movedTo))
+    if (r) stampRepos.add(r)
+  }
+  const heads = await Promise.all([...stampRepos].map(async (r) => `${basename(r)} ${await gitHead(r)}`))
 
   let out = ""
   out += line(`# Session ${parsed.sessionId}`)
   out += line(`Window: ${startMs ? new Date(startMs).toISOString() : "?"} → ${endMs ? new Date(endMs).toISOString() : "?"}`)
+  out += line(`Reconstructed as-of: ${new Date().toISOString()}`)
+  for (const h of heads) out += line(`HEAD at snapshot: ${h}`)
+  out += line("⚠ Git facts below are this snapshot. If you are reading this in a session whose current turn is later than the as-of above, re-run the script before trusting any state claim.")
   out += line()
 
   out += line("## Documentation")
@@ -331,7 +427,7 @@ async function report(sessionIdArg: string | null): Promise<string | null> {
   out += line()
 
   out += line("## Staleness vs HEAD")
-  const tracked = files.filter((f) => f.repo && f.action !== "deleted?")
+  const tracked = files.filter((f) => f.repo && f.action !== "deleted?" && !f.movedTo)
   if (tracked.length === 0) {
     out += line("(none)")
   } else {
