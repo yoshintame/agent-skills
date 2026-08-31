@@ -205,9 +205,11 @@ for (const r of rows) {
 
 let out = ""
 out += `# Region sessions: ${substrings.join(", ")}\n`
-out += `snapshot newest: ${newest} | delta: ${delta.fileCount} files (${Math.round(delta.bytes / 1024 / 1024)} MB) parsed live\n\n`
+out += `generated: ${new Date().toISOString()} | snapshot newest: ${newest} | delta: ${delta.fileCount} files (${Math.round(delta.bytes / 1024 / 1024)} MB) parsed live\n`
+out += "⚠ as-of the generated timestamp above; if you read this report in a later turn, re-run before trusting any state claim\n\n"
 
 out += "## Sessions (file-touch first, bash-only mentions after)\n"
+out += "`jsonl dir` = slug of where the transcript sits now (a valid `--resume` cwd); for renamed/linked sessions this is the link target, not necessarily the session's original working dir.\n"
 const sessionRows = [...sessions.entries()]
   .filter(([, s]) => s.edits > 0 || s.reads > 0 || s.bash > 0)
   .sort((a, b) => {
@@ -219,7 +221,7 @@ const sessionRows = [...sessions.entries()]
 if (sessionRows.length === 0) {
   out += "(none)\n"
 } else {
-  out += "| session | project | first | last | edits | writes | reads | bash |\n"
+  out += "| session | jsonl dir | first | last | edits | writes | reads | bash |\n"
   out += "|---|---|---|---|---|---|---|---|\n"
   for (const [id, s] of sessionRows.slice(0, limit)) {
     out += `| ${id} | ${s.project} | ${short(s.first)} | ${short(s.last)} | ${s.edits} | ${s.writes} | ${s.reads} | ${s.bash} |\n`
