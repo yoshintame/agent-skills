@@ -35,6 +35,6 @@ After the script runs, show a summary of what changed (removed, added, log marke
 - Always run WITHOUT `--apply` first to show the report
 - Only run with `--apply` after the user confirms or explicitly asks to apply
 - If there are "review" items (ssh, python3, new domains), ask the user whether to add them manually
-- For review items the user approves, edit `~/.dotfiles/modules/claude/config/settings.json` directly to add the rules
+- For review items the user approves, edit `~/.dotfiles/modules/home/claude/config/settings.json` directly to add the rules
 - Never add rules from the "dangerous" category
 - The script creates a backup before modifying settings — mention the backup path

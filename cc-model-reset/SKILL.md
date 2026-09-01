@@ -13,7 +13,7 @@ description: Reset the Claude Code default model back to the pinned claude-opus-
 mise run cc:model-reset
 ```
 
-Задача через `jq` ставит `model = "claude-opus-4-8[1m]"` в оригинале dotfiles (`~/.dotfiles/modules/claude/config/settings.json`; `~/.claude/settings.json` — симлинк на него, подхватывает живьём). В расширении применяется с новой сессии. Идемпотентна — повторный запуск безопасен.
+Задача через `jq` ставит `model = "claude-opus-4-8[1m]"` в оригинале dotfiles (`~/.dotfiles/modules/home/claude/config/settings.json`; `~/.claude/settings.json` — симлинк на него, подхватывает живьём). В расширении применяется с новой сессии. Идемпотентна — повторный запуск безопасен.
 
 Sandbox отключать не нужно: цель записи `~/.dotfiles/**` — в write-allow. Выведи строку `cc:model-reset: model = …` пользователю как подтверждение.
 

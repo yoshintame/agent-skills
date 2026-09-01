@@ -55,12 +55,12 @@ Workflow для добавления/изменения клавиатурных
 
 | Layer | Что проверять |
 |---|---|
-| Karabiner direct + hyper | `~/.dotfiles/modules/karabiner/config/src/hyper-layer-binds.ts` (бинды) и `actions.ts` (action-имена). |
-| Hammerspoon leader (`F18 → ...`) | `~/.dotfiles/modules/hammerspoon/config/` — leader-конфиг + sublayers. |
-| Hammerspoon App Launcher | `~/.dotfiles/modules/hammerspoon/config/` — `Alt+<letter>` маппинги. |
-| VSCode direct | `~/.dotfiles/modules/vscode/config/keybindings.json` — собственные бинды + снятые конфликты. Плюс дефолты VSCode/Cursor (если бинд не `cmd+...`, проверить, занят ли он расширением). |
-| VSCode whichkey (leader) | `~/.dotfiles/modules/vscode/config/settings.json` → поле `whichkey.bindings`. |
-| Proxy bindings (третьи приложения) | `~/.dotfiles/modules/proxy-bindings/proxy-bindings.yaml`. |
+| Karabiner direct + hyper | `~/.dotfiles/modules/home/karabiner/config/src/hyper-layer-binds.ts` (бинды) и `actions.ts` (action-имена). |
+| Hammerspoon leader (`F18 → ...`) | `~/.dotfiles/modules/home/hammerspoon/config/` — leader-конфиг + sublayers. |
+| Hammerspoon App Launcher | `~/.dotfiles/modules/home/hammerspoon/config/` — `Alt+<letter>` маппинги. |
+| VSCode direct | `~/.dotfiles/modules/home/vscode/config/keybindings.json` — собственные бинды + снятые конфликты. Плюс дефолты VSCode/Cursor (если бинд не `cmd+...`, проверить, занят ли он расширением). |
+| VSCode whichkey (leader) | `~/.dotfiles/modules/home/vscode/config/settings.json` → поле `whichkey.bindings`. |
+| Proxy bindings (третьи приложения) | `~/.dotfiles/modules/shared/proxy-bindings.yaml`. |
 
 Пути могут устареть — всегда подтверждать `ls`-ом перед чтением. Если нашёл расхождение с этим SKILL.md, сначала чини SKILL.md.
 
