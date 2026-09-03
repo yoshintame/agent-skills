@@ -1,108 +1,182 @@
 #!/usr/bin/env bun
-import { execSync } from "node:child_process";
+import { spawn } from "node:child_process"
+import { closeSync, mkdirSync, openSync } from "node:fs"
+import { join } from "node:path"
+import { defineCommand, runMain } from "citty"
+import {
+  appendJsonl,
+  byPid,
+  CLAUDE_DIR,
+  currentSession,
+  findTranscript,
+  isSession,
+  KILLS_LOG,
+  killSessionTrees,
+  lastCustomTitle,
+  mb,
+  parseLine,
+  type Proc,
+  sleep,
+  snapshot,
+  STATE_DIR,
+  subtree,
+  tailLines,
+} from "./lib.ts"
 
-const PATTERN = /anthropic\.claude-code.*native-binary/;
-const dryRun = process.argv.includes("--dry-run");
-const killAll = process.argv.includes("--all");
+const SELF_LOG = join(STATE_DIR, "self.log")
+const SELF_CAP_MS = 5 * 60_000
+const SELF_RENDER_MS = 3000
 
-type Proc = { pid: number; ppid: number; rss: number; cmd: string };
-
-function snapshot(): Proc[] {
-  const out = execSync("ps -axo pid=,ppid=,rss=,command=", {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  const procs: Proc[] = [];
-  for (const line of out.split("\n")) {
-    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/);
-    if (m) procs.push({ pid: +m[1], ppid: +m[2], rss: +m[3], cmd: m[4] });
-  }
-  return procs;
+function die(msg: string): never {
+  process.stderr.write(`reset-sessions: ${msg}\n`)
+  process.exit(1)
 }
 
-const isSession = (p: Proc) => PATTERN.test(p.cmd);
-const mb = (kb: number) => Math.round(kb / 1024);
+async function reset(all: boolean, dryRun: boolean) {
+  const before = snapshot()
+  const sessions = before.filter(isSession)
+  const beforeMem = sessions.reduce((s, p) => s + p.rss, 0)
 
-function findAncestor(procs: Proc[], start: number): number | undefined {
-  const byPid = new Map(procs.map((p) => [p.pid, p]));
-  const seen = new Set<number>();
-  let cur = byPid.get(start);
-  while (cur && cur.pid > 1 && !seen.has(cur.pid)) {
-    seen.add(cur.pid);
-    if (isSession(cur)) return cur.pid;
-    cur = byPid.get(cur.ppid);
+  let spare = new Set<number>()
+  let mine: Proc | undefined
+  if (!all) {
+    mine = currentSession(before)
+    if (mine) spare = subtree(before, mine.pid)
   }
-  return undefined;
+  const targets = sessions.filter((p) => !spare.has(p.pid))
+
+  console.log(`Сессий найдено: ${sessions.length} (${mb(beforeMem)} MB)`)
+  if (mine) console.log(`Текущая pid=${mine.pid} + поддерево (${spare.size} проц.) — щажу`)
+  else if (!all) console.log(`Текущая сессия не определена (запуск вне сессии) — под нож все`)
+
+  if (targets.length === 0) {
+    console.log("Нечего убивать.")
+    return
+  }
+
+  if (dryRun) {
+    console.log(`\n[dry-run] Убил бы ${targets.length}:`)
+    for (const p of targets) console.log(`  pid=${p.pid}  ${mb(p.rss)} MB`)
+    return
+  }
+
+  const result = await killSessionTrees(
+    before,
+    targets.map((p) => p.pid),
+  )
+  const stuck = new Set(result.stuck)
+  const killed = targets.filter((p) => !stuck.has(p.pid))
+  const freedMem = killed.reduce((s, p) => s + p.rss, 0)
+  const after = snapshot().filter(isSession)
+  const afterMem = after.reduce((s, p) => s + p.rss, 0)
+  const ts = new Date().toISOString()
+  for (const p of killed) appendJsonl(KILLS_LOG, { ts, source: "reset", pid: p.pid, rssMb: mb(p.rss) })
+
+  console.log(
+    `\nУбито: ${killed.length}/${targets.length}. Освобождено ~${mb(freedMem)} MB. Осталось сессий: ${after.length} (${mb(afterMem)} MB).`,
+  )
+  if (result.orphans.length) console.log(`Добиты осиротевшие дочерние процессы: ${result.orphans.length}`)
+  if (result.stuck.length) console.log(`Не отозвались даже на SIGKILL (зомби/reparent): ${result.stuck.join(", ")}`)
 }
 
-function subtree(procs: Proc[], root: number): Set<number> {
-  const children = new Map<number, number[]>();
-  for (const p of procs) (children.get(p.ppid) ?? children.set(p.ppid, []).get(p.ppid)!).push(p.pid);
-  const out = new Set<number>([root]);
-  const stack = [root];
-  while (stack.length) {
-    for (const c of children.get(stack.pop()!) ?? []) {
-      if (!out.has(c)) { out.add(c); stack.push(c); }
+function selfSpawn() {
+  const procs = snapshot()
+  const me = currentSession(procs)
+  const sid = process.env.CLAUDE_CODE_SESSION_ID
+  if (!me || !sid) die("не внутри сессии Claude Code: нужны CLAUDE_PID/CLAUDE_CODE_SESSION_ID или предок native-binary")
+  const transcript = findTranscript(sid)
+  if (!transcript) die(`транскрипт ${sid} не найден в ${CLAUDE_DIR}/projects`)
+
+  mkdirSync(STATE_DIR, { recursive: true })
+  const log = openSync(SELF_LOG, "a")
+  const child = spawn(
+    process.execPath,
+    [import.meta.path, "--self-worker", "--pid", String(me.pid), "--sid", sid, "--start", me.start, "--transcript", transcript],
+    { detached: true, stdio: ["ignore", log, log] },
+  )
+  child.unref()
+  closeSync(log)
+
+  console.log(
+    `Сессия ${sid.slice(0, 8)} (pid=${me.pid}, ${mb(me.rss)} MB) будет убита после конца хода, пока титул 🟢; кап ${SELF_CAP_MS / 60_000} мин. Worker pid=${child.pid}, лог ${SELF_LOG}.`,
+  )
+}
+
+function turnEndedAfter(transcript: string, sinceMs: number): boolean {
+  const lines = tailLines(transcript, 2 * 1024 * 1024)
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i].includes('"end_turn"')) continue
+    const d = parseLine(lines[i])
+    if (d?.type === "assistant" && d.message?.stop_reason === "end_turn" && Date.parse(d.timestamp) > sinceMs) return true
+  }
+  return false
+}
+
+async function selfWorker(pid: number, sid: string, start: string, transcript: string) {
+  const t0 = Date.now()
+  const log = (msg: string) => console.log(`${new Date().toISOString()} [${pid} ${sid.slice(0, 8)}] ${msg}`)
+  log("start")
+
+  let reason = "cap"
+  while (Date.now() - t0 < SELF_CAP_MS) {
+    await sleep(1000)
+    if (turnEndedAfter(transcript, t0)) {
+      reason = "end_turn"
+      break
     }
   }
-  return out;
-}
+  if (reason === "end_turn") await sleep(SELF_RENDER_MS)
 
-const before = snapshot();
-const sessions = before.filter(isSession);
-const beforeMem = sessions.reduce((s, p) => s + p.rss, 0);
-
-let spare = new Set<number>();
-let mine: number | undefined;
-if (!killAll) {
-  mine = findAncestor(before, process.pid);
-  if (mine !== undefined) spare = subtree(before, mine);
-}
-const targets = sessions.filter((p) => !spare.has(p.pid));
-
-console.log(`Сессий найдено: ${sessions.length} (${mb(beforeMem)} MB)`);
-if (mine !== undefined) console.log(`Текущая pid=${mine} + поддерево (${spare.size} проц.) — щажу`);
-else if (!killAll) console.log(`Текущая сессия не определена (запуск вне сессии) — под нож все`);
-
-if (targets.length === 0) { console.log("Нечего убивать."); process.exit(0); }
-
-if (dryRun) {
-  console.log(`\n[dry-run] Убил бы ${targets.length}:`);
-  for (const p of targets) console.log(`  pid=${p.pid}  ${mb(p.rss)} MB`);
-  process.exit(0);
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function waitGone(pids: number[], ms: number): Promise<number[]> {
-  const end = Date.now() + ms;
-  let alive = pids;
-  while (alive.length && Date.now() < end) {
-    await sleep(250);
-    const live = new Set(snapshot().filter(isSession).map((p) => p.pid));
-    alive = alive.filter((pid) => live.has(pid));
+  const title = lastCustomTitle(transcript)
+  if (!title?.startsWith("🟢")) {
+    log(`abort: title=${title ?? "<none>"}`)
+    return
   }
-  return alive;
-}
-
-const targetPids = targets.map((p) => p.pid);
-for (const pid of targetPids) {
-  try { process.kill(pid, "SIGTERM"); } catch {}
-}
-
-let alive = await waitGone(targetPids, 3000);
-if (alive.length) {
-  for (const pid of alive) {
-    try { process.kill(pid, "SIGKILL"); } catch {}
+  const procs = snapshot()
+  const me = byPid(procs).get(pid)
+  if (!me || !isSession(me) || me.start !== start) {
+    log("abort: процесс сессии ушёл или pid переиспользован")
+    return
   }
-  alive = await waitGone(alive, 2000);
+
+  const result = await killSessionTrees(procs, [pid])
+  appendJsonl(KILLS_LOG, {
+    ts: new Date().toISOString(),
+    source: "done",
+    pid,
+    sid,
+    rssMb: mb(me.rss),
+    reason,
+    orphans: result.orphans.length,
+    stuck: result.stuck,
+  })
+  log(`killed (${reason}) rss=${mb(me.rss)} MB orphans=${result.orphans.length} stuck=${result.stuck.length}`)
 }
 
-const stuck = new Set(alive);
-const killed = targets.filter((p) => !stuck.has(p.pid));
-const freedMem = killed.reduce((s, p) => s + p.rss, 0);
-const after = snapshot().filter(isSession);
-const afterMem = after.reduce((s, p) => s + p.rss, 0);
+const main = defineCommand({
+  meta: {
+    name: "reset-sessions",
+    description: "Гасит процессы сессий Claude Code (VSCode-расширение): все, кроме текущей, или собственную после конца хода.",
+  },
+  args: {
+    all: { type: "boolean", default: false, description: "Не щадить текущую сессию (запуск вне сессии)" },
+    "dry-run": { type: "boolean", default: false, description: "Показать цели, ничего не трогая" },
+    self: {
+      type: "boolean",
+      default: false,
+      description: "Убить собственную сессию после конца хода, если титул 🟢 (последний шаг /done)",
+    },
+    "self-worker": { type: "boolean", default: false, description: "Внутренний режим: отцепленный worker для --self" },
+    pid: { type: "string", description: "(self-worker) pid процесса сессии" },
+    sid: { type: "string", description: "(self-worker) id сессии" },
+    start: { type: "string", description: "(self-worker) lstart процесса сессии" },
+    transcript: { type: "string", description: "(self-worker) путь к JSONL сессии" },
+  },
+  async run({ args }) {
+    if (args["self-worker"]) return selfWorker(Number(args.pid), String(args.sid), String(args.start), String(args.transcript))
+    if (args.self) return selfSpawn()
+    return reset(args.all, args["dry-run"])
+  },
+})
 
-console.log(`\nУбито: ${killed.length}/${targets.length}. Освобождено ~${mb(freedMem)} MB. Осталось сессий: ${after.length} (${mb(afterMem)} MB).`);
-if (alive.length) console.log(`Не отозвались даже на SIGKILL (зомби/reparent): ${alive.join(", ")}`);
+runMain(main)
