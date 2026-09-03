@@ -5,7 +5,7 @@ description: Deploy the lasthaze-homelab NixOS box.
 
 # homelab-deploy
 
-`lasthaze-homelab` (NixOS OptiPlex, tailnet-only) is built from two private repos:
+`lasthaze-homelab` (NixOS OptiPlex, tailnet-only) is built from two repos (dotfiles is public, homelab is private):
 
 - **dotfiles** — `~/.dotfiles`, `git@github.com:yoshintame/dotfiles`. Owns the host: `hosts/lasthaze-homelab/` (`disko.nix`, `deploy.nix`, base). Flake attr `.#lasthaze-homelab`.
 - **homelab** — `~/Development/personal/lasthaze-homelab`, `git@github.com:yoshintame/lasthaze-homelab`. Owns services + infra, consumed by dotfiles as `inputs.homelab`. dotfiles **floats** this input (no pin): every deploy runs `nix flake update homelab`, so the box always rides fresh homelab `main`.
@@ -60,6 +60,6 @@ Service change → pull only (float, no Mac lock to diverge from `main`). Push i
 
 ## Bootstrap facts (for debugging a broken deploy, not routine)
 
-- The box pulls both private repos with two read-only **deploy keys** in sops `secrets/homelab/deploy.yaml`, routed by ssh host alias on the box: `github.com` → homelab key, `dotfiles.github.com` → dotfiles key (one deploy key can't cover two repos on GitHub).
+- The box pulls both repos with two read-only **deploy keys** in sops `secrets/homelab/deploy.yaml`, routed by ssh host alias on the box: `github.com` → homelab key, `dotfiles.github.com` → dotfiles key (one deploy key can't cover two repos on GitHub).
 - Trigger auth: Tailscale SSH (`--ssh` on the box) + a tailnet ACL `accept` rule for `autogroup:self` + NOPASSWD sudo scoped to exactly `systemctl start homelab-deploy.service`.
 - age identity is the box's SSH host key (`age1u83d9…`); a reinstall must preserve `/etc/ssh/ssh_host_ed25519_key` via `nixos-anywhere --extra-files`, or the sops enrollment breaks.
