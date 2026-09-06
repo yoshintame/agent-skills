@@ -106,3 +106,9 @@ not a preamble.
 - Re-running the task **with** the skill changed the behavior; check it against the
   reference by eye if one exists.
 - The file passes its own linter and reads as a patch to default behavior, not a tutorial.
+
+If the canonical target is inside an APM producer (`.apm/skills/<name>/` or
+`skills/<name>/` beside `apm.yml`), hand off to `/apm-skill-dev` with the
+producer root, skill name, tier, and intended consumer. That skill owns
+materialization, provider checks, release, and promotion. Skip this handoff for
+unmanaged or provider-local skills.
