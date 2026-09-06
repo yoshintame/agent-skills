@@ -37,5 +37,8 @@ try {
   const e = err as { stderr?: Buffer | string; stdout?: Buffer | string; message: string }
   const out = `${e.stdout?.toString() ?? ""}${e.stderr?.toString() ?? ""}`
   process.stderr.write(out || `${e.message}\n`)
+  if (provider === "codex" && /transport closed|connect to daemon|6767/i.test(out)) {
+    process.stderr.write("paseo-import: Codex sandboxes network — re-run with escalated permissions (the daemon is already up)\n")
+  }
   process.exit(1)
 }
