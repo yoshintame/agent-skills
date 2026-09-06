@@ -32,7 +32,7 @@ if (dryRun) {
 }
 
 try {
-  process.stdout.write(execFileSync("paseo", args, { encoding: "utf8" }))
+  process.stdout.write(execFileSync("paseo", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }))
 } catch (err) {
   const e = err as { stderr?: Buffer | string; stdout?: Buffer | string; message: string }
   const out = `${e.stdout?.toString() ?? ""}${e.stderr?.toString() ?? ""}`
