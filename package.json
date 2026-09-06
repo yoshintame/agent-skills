@@ -1,6 +1,6 @@
 {
-  "name": "session-status",
-  "version": "0.1.0",
+  "name": "agent-skills",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "dependencies": {

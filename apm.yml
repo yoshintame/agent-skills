@@ -1,0 +1,9 @@
+name: agent-skills
+version: 1.0.0
+description: Personal skills for Claude Code, Codex, and Cursor
+license: UNLICENSED
+targets: [claude, codex]
+includes: auto
+dependencies:
+  apm: []
+  mcp: []
