@@ -1,47 +1,50 @@
 ---
 name: apm-skill-dev
-description: Develop and release an APM-managed skill.
+description: Разработка и выпуск APM-managed скила.
 ---
 
-Resolve the producer, skill, tier, and consumer before editing. Edit only the
-authoring source; `.claude/skills`, `.agents/skills`, `.cursor/skills`, and
-`apm_modules` are disposable output.
+До правки определи пакет-источник, скил, ярус и consumer. Редактируй только
+авторский исходник; `.claude/skills`, `.agents/skills`, `.cursor/skills` и
+`apm_modules` — одноразовый результат генерации.
 
-| Tier | Authoring source | Consumer |
+| Ярус | Авторский исходник | Consumer |
 |---|---|---|
-| personal | `agent-skills/.apm/skills/<name>/` | user-scope `~/.apm` owned by dotfiles |
-| org | `<package>/skills/<name>/` | one selected repository or workspace |
-| repository | `<consumer>/.apm/skills/<name>/` | that same repository |
+| personal | `agent-skills/.apm/skills/<name>/` | user-scope `~/.apm`, принадлежащий dotfiles |
+| org | `<package>/skills/<name>/` | один выбранный репозиторий или workspace |
+| repository | `<consumer>/.apm/skills/<name>/` | тот же репозиторий |
 
-If the content is new or changing, run `/create-skill` first. Accept its handoff
-only after its baseline, gap filter, linter, and behavioral check pass. This
-skill owns what follows: source selection, materialization, provider checks,
-release, and promotion. Do not duplicate authoring guidance here.
+Для нового или изменяемого содержимого сначала вызови `/create-skill`. Принимай
+его результат только после baseline, gap-фильтра, линтера и поведенческой
+проверки. Дальше этот скил владеет выбором исходника, материализацией, проверками
+провайдеров, выпуском и продвижением. Не дублируй здесь правила подготовки
+содержимого.
 
-## APM 0.29.1 constraints
+## Ограничения APM 0.29.1
 
-- `--dev` only writes the dependency under `devDependencies`; it is not an
-  editable install, watch mode, or override. Bare `apm install` installs both
-  dependency sections.
-- A local direct dependency is recopied by each bare `apm install`. Use that
-  after every source edit; `--refresh` is not part of the inner loop.
-- User-scope `path:` values are absolute.
-- Dev replaces the package's production Git entry with one local `path:` entry.
-  Never leave both sources in either dependency section.
-- Package-root dependencies do not travel with an individual skill. Runtime
-  entry points must use bundled dependencies or a stable executable on `PATH`
-  and must resolve from the loaded skill directory, never `.claude/skills`.
+- `--dev` только записывает зависимость в `devDependencies`; это не редактируемая
+  установка, watch-режим и не переопределение. `apm install` без дополнительных
+  флагов устанавливает обе секции зависимостей.
+- Каждый `apm install` без дополнительных флагов заново копирует прямую локальную
+  зависимость. Запускай его после каждой правки исходника; `--refresh` во
+  внутренний цикл не входит.
+- Значение `path:` в пользовательском scope должно быть абсолютным.
+- В dev production Git-запись пакета заменяется одной локальной записью `path:`.
+  Никогда не оставляй оба источника ни в одной секции зависимостей.
+- Корневые зависимости пакета не приезжают с отдельным скилом. Точки входа
+  скриптов должны использовать вложенные зависимости или стабильный исполняемый
+  файл на `PATH` и разрешаться от каталога загруженного скила, но не от
+  `.claude/skills`.
 
-If the installed APM version differs, re-check these facts from `apm install
---help`, the manifest schema, and one isolated probe before mutating a consumer.
+Если установленная версия APM отличается, до мутации consumer-а перепроверь эти
+факты по `apm install --help`, схеме manifest и одной изолированной пробе.
 
-Resolve `<skill-dir>` from this loaded skill's catalog path. Never substitute a
-provider-specific install path. The bundled helper is
+Получи `<skill-dir>` из каталожного пути этого загруженного скила. Не подставляй
+путь установки конкретного провайдера. Вложенный скрипт-помощник лежит в
 `<skill-dir>/scripts/apm-skill-dev.ts`.
 
-## Test first in isolation
+## Сначала изолированная проверка
 
-Use isolation for every first materialization and for ordinary edit-test loops:
+Для первой материализации и обычных циклов «правка — тест» используй изоляцию:
 
 ```sh
 bun <skill-dir>/scripts/apm-skill-dev.ts isolated \
@@ -49,28 +52,29 @@ bun <skill-dir>/scripts/apm-skill-dev.ts isolated \
   --target claude,codex -- <smoke-command>
 ```
 
-The helper exposes the temporary consumer as `APM_DEV_ROOT`, checks requested
-skills in every selected target, and removes its own temporary root. Run a
-second pass with `--target codex`; it must succeed without creating
-`.claude/skills`. Invoke scripted entry points from an unrelated cwd inside the
-smoke command. Re-run the same command after each source change: each run uses a
-fresh bare install.
+Скрипт-помощник передаёт путь временного consumer-а через `APM_DEV_ROOT`, проверяет
+запрошенные скилы в каждом выбранном target и удаляет свой временный корень.
+Отдельно прогони `--target codex`: он должен пройти без создания
+`.claude/skills`. Внутри smoke-команды вызывай точки входа скриптов из
+постороннего cwd. После каждой правки исходника повторяй ту же команду: каждый
+прогон выполняет новый `apm install` без дополнительных флагов.
 
-For a repository-specific skill, pass the consumer itself as `--source`; APM
-materializes its local `.apm/skills`. Live materialization is a bare `apm
-install` in that consumer. There is no Git-dependency override or package
-promotion boundary: the repository commit is the release.
+Для repository-specific скила передай сам consumer в `--source`: APM
+материализует его локальные `.apm/skills`. Live-материализация — `apm install`
+без дополнительных флагов в этом consumer-е. Переопределения Git-зависимости и
+границы продвижения пакета нет: выпуском служит коммит репозитория.
 
-## Scoped live dogfooding
+## Ограниченный live-догфудинг
 
-Use live dogfooding only when provider discovery or real interaction cannot be
-proved in isolation. The helper holds one consumer lock for the entire child
-process, snapshots manifest and lock bytes before mutation, restores them on
-success, failure, SIGINT, or SIGTERM, runs a frozen prod materialization, and
-removes paths added under allowlisted APM provider/cache roots. The state stores
-that surface inventory before mutation, so SIGKILL leaves a complete recovery.
+Используй live-догфудинг, только если обнаружение скила провайдером или реальное
+взаимодействие нельзя доказать в изоляции. Скрипт-помощник удерживает один consumer-lock
+на всё время дочернего процесса, до мутации снимает байтовые снимки manifest и
+lock, восстанавливает их после успеха, ошибки, `SIGINT` или `SIGTERM`, выполняет
+frozen-материализацию prod и удаляет пути, добавленные в разрешённых APM-корнях
+провайдеров и кэша. Инвентарь этой поверхности записывается до мутации, поэтому
+после `SIGKILL` остаётся полное состояние для восстановления.
 
-Project or org consumer:
+Project- или org-consumer:
 
 ```sh
 bun <skill-dir>/scripts/apm-skill-dev.ts with-dev \
@@ -79,7 +83,7 @@ bun <skill-dir>/scripts/apm-skill-dev.ts with-dev \
   -- <provider-or-smoke-command>
 ```
 
-Personal user scope:
+Персональный пользовательский scope:
 
 ```sh
 bun <skill-dir>/scripts/apm-skill-dev.ts with-dev \
@@ -88,43 +92,46 @@ bun <skill-dir>/scripts/apm-skill-dev.ts with-dev \
   -- <provider-or-smoke-command>
 ```
 
-Global mutation is valid only when both live files resolve to
-`$DOTFILES/modules/home/apm/config/`. The helper uses `mise run dot:apm`; never
-run raw mutating global APM commands. A pre-existing local `path:` is another
-owner's dev state, not permission to replace or restore it.
+Глобальная мутация допустима, только когда оба live-файла разрешаются в
+`$DOTFILES/modules/home/apm/config/`. Скрипт-помощник использует `mise run dot:apm`;
+никогда не запускай напрямую глобальные команды APM с мутацией. Существующий
+локальный `path:` — dev-состояние другого владельца, а не разрешение заменить
+или восстановить его.
 
-Do not commit a consumer while `with-dev` is active. Diagnose ownership with:
+Не коммить consumer, пока активен `with-dev`. Проверяй владение командой:
 
 ```sh
 bun <skill-dir>/scripts/apm-skill-dev.ts status --consumer <absolute-consumer-root>
 ```
 
-After a killed owner is confirmed dead, recover idempotently:
+Убедившись, что убитый владелец больше не работает, восстанови состояние
+идемпотентно:
 
 ```sh
 bun <skill-dir>/scripts/apm-skill-dev.ts recover --consumer <absolute-consumer-root>
 ```
 
-`--force` is only for an inspected false-positive live PID. Never force over a
-real owner.
+`--force` допустим только для PID, который после проверки оказался ошибочно
+определён как живой. Никогда не применяй его поверх реального владельца.
 
-## Release and promotion boundary
+## Граница выпуска и продвижения
 
-`create` and `update` end with source plus content gates. `test` may materialize
-local source but cannot change a production ref. `release` starts only from a
-clean intended producer diff: align package and marketplace versions, run the
-producer's full tests and `apm pack` version/clean checks, then commit. Creating
-an annotated signed tag or pushing is an external release action and requires
-explicit user authorization.
+`create` и `update` заканчиваются исходником и проверками содержимого. `test`
+может материализовать локальный исходник, но не менять production ref. `release`
+начинается только с чистого целевого diff пакета-источника: выровняй версии пакета
+и marketplace, прогони полные тесты пакета-источника и проверки version/clean
+через `apm pack`, затем закоммить. Создание annotated signed tag и push — внешние
+действия выпуска, требующие явного разрешения пользователя.
 
-`promote` starts after the tag is remotely available. Keep the consumer on its
-Git dependency, preview the lock change with `apm update --dry-run`, apply the
-selected version, run frozen install plus provider/runtime smoke tests, and
-commit only the consumer manifest/lock that actually changed. For user scope,
-run update and frozen install through `mise run dot:apm` and finish by checking
-that both `realpath` results still point into canonical dotfiles.
+`promote` начинается после появления тега в remote. Оставь consumer на его
+Git-зависимости, просмотри изменение lock через `apm update --dry-run`, примени
+выбранную версию, выполни frozen install и smoke-тесты провайдеров/runtime, затем
+закоммить только действительно изменившиеся manifest/lock consumer-а. Для user
+scope запускай update и frozen install через `mise run dot:apm`; в конце проверь,
+что оба результата `realpath` по-прежнему указывают на canonical-файлы dotfiles.
 
-Done means the source diff is committed, isolated Claude+Codex and Codex-only
-checks pass, any live child has exited, `status` reports no owned state, the
-consumer manifest/lock equal their production state, no dev-only generated path
-remains, and no generated provider directory is staged.
+Готово, когда diff исходника закоммичен, изолированные проверки Claude+Codex и
+Codex-only проходят, каждый дочерний процесс завершён, `status` не показывает
+активного владельца, manifest/lock consumer-а совпадают с production, dev-only
+сгенерированные пути отсутствуют и ни один сгенерированный каталог провайдера не
+попал в индекс Git.
