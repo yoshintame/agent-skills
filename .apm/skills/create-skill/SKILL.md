@@ -108,7 +108,11 @@ not a preamble.
 - The file passes its own linter and reads as a patch to default behavior, not a tutorial.
 
 If the canonical target is inside an APM producer (`.apm/skills/<name>/` or
-`skills/<name>/` beside `apm.yml`), hand off to `/apm-skill-dev` with the
-producer root, skill name, tier, and intended consumer. That skill owns
-materialization, provider checks, release, and promotion. Skip this handoff for
-unmanaged or provider-local skills.
+`skills/<name>/` beside `apm.yml`), edit that source, never the materialized
+copies under `.claude/skills`/`.agents/skills`. To test the change with real
+project context — `/dev-<name>` beside the production skill in every project —
+run `bun scripts/skill-dev.ts <name>` from the producer: it copies the source to
+global `dev-<name>` skills for Claude and Codex without touching the production
+skill or the APM manifest. Re-run after each edit to resync, `--remove` when
+done. Shipping the change is the normal APM release (tag, then global install),
+outside this skill.
