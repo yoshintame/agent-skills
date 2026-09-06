@@ -7,7 +7,7 @@ Never hand-roll transcription — no direct Deepgram/curl, no ad-hoc whisper. Th
 
 Vault root: `$OBSIDIAN_VAULT`, fallback `~/Documents/obsidian/yoshintame`.
 
-Argument: one or more recording file paths (usually in `~/Downloads`). One recording per meeting; the import uses the first media file it finds.
+Argument: one or more recording file paths. One recording per meeting; the import uses the first media file it finds. Zoom calls recorded with CleanShot land in `~/Pictures/Screenshots` (`zoom.us Zoom Workplace on <Month> <DD> <YYYY> at <HH.MM.SS>.mp4`), not `~/Downloads` — when the user names a meeting by weekday, match that filename's date there.
 
 ## Steps
 
@@ -19,7 +19,7 @@ Argument: one or more recording file paths (usually in `~/Downloads`). One recor
 
    It prints the path and stamps the current time; for an older recording, fix the folder name and `date:` to match.
 
-2. **Fill the stub frontmatter** — only what a human knows: `title`, and `attendees` as `"[[person-slug]]"` for everyone who was actually in the room, the vault owner included: Михаил is `[[mikhail]]`, an ordinary person note like any other. Attendance is a per-meeting fact — he is on most Senate calls and off many VTB ones — so read it off the recording's participant list, never assume it either way. Omitting someone costs speaker identification: the pipeline can only put names to voices it was given, and anyone left out stays `Speaker N` in the transcript. Each slug must resolve to `persons/<slug>.md` or the import aborts — create the missing person note first (skill `obsidian-vault`). Optional: `parent: "[[org]]"`, `language:`.
+2. **Fill the stub frontmatter** — only what a human knows: `title`, and `attendees` as `"[[person-slug]]"` for everyone who was actually in the room, the vault owner included: Михаил is `[[mikhail]]`, an ordinary person note like any other. Attendance is a per-meeting fact — he is on most Senate calls and off many VTB ones — so read it off the recording's participant list, never assume it either way. Omitting someone costs speaker identification: the pipeline can only put names to voices it was given, and anyone left out stays `Speaker N` in the transcript. Each slug must resolve to `persons/<slug>.md` or the import aborts — create the missing person note first (skill `obsidian-vault`). Optional: `parent:` and `language:`. `parent` is multi-valued in the schema — write it as a YAML list of `"[[slug]]"` items, never as a scalar, or `vault-types validate` flags `multi-cardinality-mismatch`.
 
 3. **Copy the recording into the folder**, named after the slug. The import picks the first file with extension `mp4 mkv webm mov m4a mp3 wav` — the name is free, but `<slug>.<ext>` is what the archive will hold, so use it from the start and skip a rename later:
 
@@ -44,6 +44,8 @@ Argument: one or more recording file paths (usually in `~/Downloads`). One recor
    ```sh
    mv "$OBSIDIAN_VAULT/events/meetings/<slug>/<slug>.mp4" ~/Video/meetings/
    ```
+
+   Run the `mv` with the Bash sandbox disabled (`dangerouslyDisableSandbox: true`) — `~/Video` is not in the sandbox write-allowlist, so a sandboxed move dies with `Operation not permitted`.
 
    `~/Video` is outside iCloud and is covered by the restic `home` profile. Leaving the file in the vault re-creates the problem the archive exists to solve — see `[[meeting-recordings-inflate-vault]]`.
 
