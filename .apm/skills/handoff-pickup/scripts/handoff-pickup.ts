@@ -12,7 +12,7 @@ if (!existsSync(path)) {
 }
 const force = process.argv.slice(3).some((a) => a === "force" || a === "--force");
 
-const sessionId = process.env.CLAUDE_CODE_SESSION_ID ?? "unknown";
+const sessionRef = currentSessionRef();
 const now = new Date().toISOString();
 
 const content = readFileSync(path, "utf8");
@@ -29,7 +29,7 @@ for (const ln of fmRaw.split("\n")) {
   if (m) kv[m[1]] = m[2];
 }
 
-if (kv.created_by === sessionId) {
+if (kv.created_by && normalizedSessionRef(kv.created_by) === sessionRef) {
   console.error("refusing pickup: current session is the creator");
   process.exit(2);
 }
@@ -45,11 +45,14 @@ const parseList = (v: string | undefined): string[] => {
 
 const consumedBy = parseList(kv.consumed_by);
 const consumedAt = parseList(kv.consumed_at);
+const consumedByCurrentSession = consumedBy.some(
+  (ref) => normalizedSessionRef(ref) === sessionRef,
+);
 
 const others = consumedBy
   .map((id, i) => ({ id, at: consumedAt[i] ?? "?" }))
-  .filter((p) => p.id !== sessionId);
-if (others.length > 0 && !consumedBy.includes(sessionId) && !force) {
+  .filter((p) => normalizedSessionRef(p.id) !== sessionRef);
+if (others.length > 0 && !consumedByCurrentSession && !force) {
   const rows = others.map((p) => `  - ${p.id}  at ${p.at}`).join("\n");
   process.stdout.write(
     "ALREADY PICKED UP — nothing written, file untouched (no `force`).\n" +
@@ -61,8 +64,8 @@ if (others.length > 0 && !consumedBy.includes(sessionId) && !force) {
   process.exit(3);
 }
 
-if (!consumedBy.includes(sessionId)) {
-  consumedBy.push(sessionId);
+if (!consumedByCurrentSession) {
+  consumedBy.push(sessionRef);
   consumedAt.push(now);
 }
 
@@ -78,3 +81,20 @@ const newFm = order
 writeFileSync(path, `---\n${newFm}\n---\n${body}`);
 
 process.stdout.write(body);
+
+function currentSessionRef(): string {
+  const refs = [
+    process.env.CODEX_THREAD_ID ? `codex:${process.env.CODEX_THREAD_ID}` : null,
+    process.env.CLAUDE_CODE_SESSION_ID ? `claude:${process.env.CLAUDE_CODE_SESSION_ID}` : null,
+  ].filter((ref): ref is string => ref !== null);
+
+  if (refs.length === 1) return refs[0];
+
+  const reason = refs.length === 0 ? "no session id found" : "multiple session ids found";
+  console.error(`handoff-pickup: ${reason}`);
+  process.exit(1);
+}
+
+function normalizedSessionRef(ref: string): string {
+  return ref.includes(":") ? ref : `claude:${ref}`;
+}

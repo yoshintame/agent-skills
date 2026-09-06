@@ -12,10 +12,12 @@ One argument: a short description of what the next session does. If none is give
 Derive a short ascii kebab-slug from the description, then:
 
 ```
-bun ~/.claude/skills/handoff-create/scripts/handoff-create.ts <slug>
+bun ~/.agents/skills/handoff-create/scripts/handoff-create.ts <slug>
 ```
 
-The script writes `~/.claude/handoffs/<cwd>/<slug>.md` with the frontmatter (`status: open`, `created_by`, `created_at`) and a `<!-- handoff body -->` placeholder. Stdout is two lines:
+Run the command outside the project sandbox: the shared mutable store under `~/.agents/handoffs` requires host write access.
+
+The script writes `~/.agents/handoffs/<cwd>/<slug>.md` with the frontmatter (`status: open`, provider-qualified `created_by`, `created_at`) and a `<!-- handoff body -->` placeholder. Stdout is two lines:
 
 - line 1: absolute path to the new file
 - line 2: the pickup command for the next session, with path already substituted
