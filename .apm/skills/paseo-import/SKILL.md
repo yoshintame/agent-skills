@@ -17,4 +17,5 @@ The script exists because a raw `paseo import <id>` is wrong two ways: without `
 
 - `--dry-run` prints the composed command and runs nothing.
 - Extra args are forwarded to `paseo import`, e.g. `--label key=value`.
-- A non-zero exit is paseo's own error verbatim — daemon down, id already imported, or `already has an active writer` (the session is still held open elsewhere; release it there first). Relay it, don't retry blind.
+- A non-zero exit is paseo's own error verbatim (daemon down, id already imported). Relay it, don't retry blind.
+- `already has an active writer` under Codex is handled for you: the script spawns a detached helper that imports once the thread's writer lock frees, logging to `/tmp/paseo-import/<thread-id>.log`. A dedicated `codex resume` holder is terminated (this session ends); a shared app-server is left alone — close the session yourself and the helper imports on release.
