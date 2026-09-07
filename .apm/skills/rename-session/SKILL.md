@@ -1,68 +1,46 @@
 ---
 name: rename-session
-description: Rename the current Claude Code session to a short, human-readable label following the `<status-emoji> [<prefix>/]<kebab-title>` convention. Atomically appends a `custom-title` event to the session's JSONL. Use when the user types `/rename-session`, `/rename-session done|paused|active`, or says "переименуй сессию", "rename this session", "name this session", "дай имя сессии".
+description: Rename the current AI coding session.
 ---
 
-# /rename-session
+Infer one name from the work actually done, then let the bundled script validate and write it. Never edit Claude JSONL or Codex storage directly.
 
-In-session AI rename. **You (the agent) decide the name from session context. The bundled script handles status→emoji mapping, validation, and the atomic JSONL append.** You never write the JSONL yourself, never apply regexes — that boundary is strict.
+## Format
 
-Design reference: `$OBSIDIAN_VAULT/projects/ai-session-management/session-rename-skill.md`
+`<status-emoji> <type>/<slug>`
 
-## Naming convention
+- Status is `active` → `🔴`, `paused` → `🟡`, or `done` → `🟢`. Use an explicit user argument; otherwise default to `active` and infer `done` only from a clear closing signal.
+- Type is required. This table is the human-facing projection of `SESSION_TYPE_SIGNATURES` in `scripts/append-custom-title.ts`; the script is authoritative.
+- Slug is 2–5 lowercase English kebab words describing this session's work.
 
+| Type | Observable signature |
+| --- | --- |
+| `impl` | implemented a change |
+| `fix` | repaired broken behavior |
+| `groom` | analyzed and designed work before implementation |
+| `research` | discovered external tools, market options, or established practice |
+| `investigate` | diagnosed a cause inside the system |
+| `extract` | recorded conclusions from work already completed |
+| `review` | reviewed quality without making changes |
+| `ops` | ran production, deployment, backup, or data migration operations |
+| `analytics` | queried data for an answer without mutations |
+| `config` | configured the local environment or tooling |
+| `ask` | answered a one-off question or explanation |
+
+Use the operation, not the artifact, as the discriminator. Documentation is not a type. Refactoring and test-writing are `impl`; a diagnostic test run is `investigate`. External discovery is `research`; diagnosis inside the user's system is `investigate`.
+
+## Rename
+
+Derive a lowercase kebab feature for the workspace-level task, distinct from the session-stage slug. Run the bundled script from this skill's directory (`<skill-dir>` is the directory containing this file):
+
+```bash
+bun <skill-dir>/scripts/append-custom-title.ts --status <active|paused|done> --feature <kebab-feature> "<type>/<kebab-slug>"
 ```
-<status-emoji> [<prefix>/]<kebab-title>
-```
 
-- **status-emoji** — `🔴` active / `🟡` paused / `🟢` done. Default `active`. You pass this via `--status`; the script renders the emoji.
-- **prefix** *(optional, one segment)* — either a scope (`sesher`, `dotfiles`, `vault`, `homelab`, `research`, ...) **or** a type (`impl`, `research`, `groom`, `plan`, `analytics`, `fix`, `refactor`). Pick whichever groups the session more strongly. Not both.
-- **kebab-title** — 2–5 lowercase kebab-case English words. Capture the essence.
+Run outside the project sandbox. The script selects exactly one backend from `CODEX_THREAD_ID` or `CLAUDE_CODE_SESSION_ID`, writes the provider name, then best-effort updates a matching Paseo agent and seeds its workspace only when the workspace title is empty. Paseo absence or failure does not undo a provider rename.
 
-Target length ≤ 50 visible chars. Hard ceiling 80 (script enforces).
+Echo the script's stdout as one line. If it exits non-zero, surface stderr verbatim and do not retry with a mutated name unless the user asks.
 
-Examples: `🔴 sesher/impl-rename-skill`, `🟡 dotfiles/secret-strategies`, `🟢 vault/groom-ai-session-mgmt`, `🔴 fix-cc-notification-hooks`.
+## Boundaries
 
-## Steps
-
-1. **Pick the status.**
-   - If the user passed one after the command (`done`, `paused`, `active`) — use it.
-   - Otherwise infer from context (default `active`; switch to `done` only when the session has a clear closing signal — final commit landed, user said "готово"/"done", everything wrapped).
-
-2. **Compose `[<prefix>/]<kebab-title>` from session context.**
-   - Skim what the session actually did — files touched, project, intent.
-   - Pick one prefix slot if there's an obvious group (project scope or work type). Skip the prefix when the title alone is clear.
-   - 2–5 kebab words, lowercase, English only, only `[a-z0-9-]`.
-
-3. **Invoke the script.** It maps status to emoji, validates, and atomically appends:
-
-   ```bash
-   bun ~/.claude/skills/rename-session/scripts/append-custom-title.ts --status <active|paused|done> "<[prefix/]kebab-title>"
-   ```
-
-   Pass the **kebab title without the emoji** — the script prepends it. The script prints the final composed name (e.g. `🟢 vault/groom-ai-session-mgmt`) to stdout.
-
-   Run the command with the Bash sandbox disabled (`dangerouslyDisableSandbox: true`) from the start: the append target `~/.claude/projects/**` sits in the sandbox's built-in write-deny, so a sandboxed attempt always dies with EPERM. `Bash(bun *)` is in the permission allowlist — the unsandboxed call goes through without a prompt.
-
-4. **Echo the script's output to the user** as a single line, so they immediately see the new name and can re-run `/rename-session` if it doesn't fit.
-
-## Rules
-
-- Never construct the JSONL line, never call `Write`/`Edit` on a `.jsonl`, never include the emoji in the positional argument. The script owns all of that.
-- If the script exits non-zero, surface the stderr message verbatim — don't try to "fix" the name by retrying with a mutated title unless the user asks. The error messages are specific (invalid chars, missing session, etc.).
-- Don't auto-rerun on every prompt. After a baseline name exists, only rename on an explicit user request.
-
-## Script reference
-
-`scripts/append-custom-title.ts` — TypeScript on bun, zero shell ops (pure `node:fs` + JSON), no third-party deps. `dax-sh` was considered per the project's anti-bash policy but skipped: this script doesn't shell out, so adding it would be dead weight.
-
-Behavior:
-
-- Discovers the session JSONL via `CLAUDE_CODE_SESSION_ID` env (primary) → `~/.claude/projects/<cwd-hash>/<sid>.jsonl`, falling back to a scan across project dirs if cwd-hash misses (worktrees). If the env var is absent, picks the most recently modified `*.jsonl` in the cwd-hash dir.
-- Maps `--status` to `🔴|🟡|🟢`, composes `<emoji> [prefix/]title`, validates against `^(🔴|🟡|🟢) ([a-z0-9-]+/)?[a-z0-9-]+$` and `≤ 80` visible chars.
-- Atomic `O_APPEND` write of `{"type":"custom-title","sessionId":"...","customTitle":"..."}` + newline. Single sub-PIPE_BUF write — no advisory lock needed (last entry wins on concurrent renames, same semantics as native CC `/rename`).
-- Prints the final composed name to stdout. Errors go to stderr with `rename-session:` prefix and exit 1.
-
-## Known limitation
-
-Native CC UI reads only the last 64 KB of the JSONL. On long sessions the `custom-title` event is evicted and the default `aiTitle` reappears. Out of scope for this skill — see `session-rename-skill.md` § "64KB keepalive".
+Pass no emoji in the positional name; the script owns status mapping. The type is mandatory and restricted to the table. Once a baseline name exists, change its slug only on an explicit request. Existing legacy names are not migrated.
