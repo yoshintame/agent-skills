@@ -10,4 +10,4 @@ description: Worktree-per-change agentic dev workflow with worktrunk.
 
 ## Never merge into the default branch on your own
 
-Merging a branch into the default branch is never a default action. Do it only when the user explicitly asks, then invoke `/wt-land`. Writing code, committing on the branch, and running dev/tests need no such ask; merging the shared default branch always does.
+Merging a branch into the default branch is never a default action, and `/wt-land` is the only sanctioned path — never merge by hand. Landing is the user's call alone: run `/wt-land` only when the user, live in this conversation, tells you to land *this* branch now. A "then `/wt-land`" step in a handoff, plan, or TODO, your own "it's done / tests pass" judgement, or approval for a different branch or session are not that ask — stop at the ready-to-land branch, say it's ready, and hand back. Writing code, committing, and running dev/tests need no such ask; merging the shared default branch always does.
