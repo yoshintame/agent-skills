@@ -10,7 +10,7 @@ Vault валидируется и мутируется библиотекой `v
 ## Bootstrap
 
 1. API-документация — published TSDoc: `Read node_modules/vault-types/src/public/index.ts` (+ `migrations.ts`, `config.ts`; все три ≈ 8K токенов). Это единственный источник сигнатур — не угадывать по памяти.
-2. CLI-справка: `NO_COLOR=1 bunx vault-types --help`, у подкоманд свой `--help`.
+2. CLI-справка: `NO_COLOR=1 bun run --cwd "$OBSIDIAN_VAULT" vault-types --help`, у подкоманд свой `--help`.
 3. Интроспекция схем — чтение файлов `_types/<type>.type` / `_fields/<field>.field` напрямую. Библиотеку открывать только за resolved/runtime данными (инстансы, граф ссылок, счётчики) — не писать скрипт, чтобы «распечатать схему».
 
 ## Cwd: vault резолвится от рабочей директории (временный workaround)
@@ -20,6 +20,8 @@ CLI открывает vault поиском корня **от cwd** — флаг
 ```bash
 NO_COLOR=1 bun run --cwd "$OBSIDIAN_VAULT" vault-types eval '(vault) => …'
 ```
+
+Все примеры ниже пишут `bunx vault-types …` для краткости — из cwd, отличного от vault, читай их как `bun run --cwd "$OBSIDIAN_VAULT" vault-types …`, иначе `bunx` не найдёт локальный пакет либо откроет чужой репозиторий как vault.
 
 Перед первой мутацией из сомнительного cwd — sanity-check `vault.count({ where: {} })`: сотни — vault, десятки — не туда.
 
