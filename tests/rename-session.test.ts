@@ -39,11 +39,13 @@ const renameSessionSkill = resolve(
   'rename-session',
   'SKILL.md',
 )
+const fakeDaemon = resolve(import.meta.dir, 'fixtures', 'fake-paseo-daemon.ts')
 
 let cwd: string
 let home: string
 let bin: string
 let calls: string
+let daemonProc: ReturnType<typeof Bun.spawn> | undefined
 
 beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), 'rename-session-cwd-'))
@@ -54,6 +56,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  daemonProc?.kill()
+  daemonProc = undefined
   rmSync(cwd, { force: true, recursive: true })
   rmSync(home, { force: true, recursive: true })
 })
@@ -183,7 +187,7 @@ test('renames the matching Paseo agent and seeds an untitled workspace', () => {
   expect(result.success, result.stderr).toBe(true)
   expect(paseoCalls()).toEqual([
     ['agent', 'update', 'agent-1', '--name', '🔴 impl/rename-session-backends'],
-    ['workspace', 'rename', 'wks-1', '🔴 multiprovider-session-naming'],
+    ['workspace', 'rename', 'wks-1', 'multiprovider-session-naming'],
   ])
 })
 
@@ -235,39 +239,62 @@ test('keeps a successful provider rename when Paseo commands fail', () => {
   expect(paseoCalls()).toHaveLength(2)
 })
 
-test('updates the current workspace status while preserving its feature', () => {
+test('drops the emoji from the title and swaps the status label for the current workspace', async () => {
   writePaseoStub()
+  writeCliClientId()
   writePaseoAgent({ nativeHandle: 'codex-thread-1', workspaceId: 'wks-1' })
   writePaseoWorkspaces([{ title: '🔴 multiprovider-session-naming', workspaceId: 'wks-1' }])
+  const listen = await startFakeDaemon(['wks-1:active'])
 
   const result = runWorkspace(['--status', 'done'], {
     CODEX_THREAD_ID: 'codex-thread-1',
+    PASEO_LISTEN: listen,
   })
 
   expect(result.success, result.stderr).toBe(true)
-  expect(result.stdout).toBe('🟢 multiprovider-session-naming\n')
-  expect(paseoCalls()).toEqual([
-    ['workspace', 'rename', 'wks-1', '🟢 multiprovider-session-naming'],
+  expect(result.stdout).toBe('multiprovider-session-naming [done]\n')
+  expect(paseoCalls()).toEqual([['workspace', 'rename', 'wks-1', 'multiprovider-session-naming']])
+  expect(labelCalls()).toEqual([
+    { assigned: true, color: 'emerald', name: 'done', workspaceId: 'wks-1' },
+    { assigned: false, color: 'red', name: 'active', workspaceId: 'wks-1' },
   ])
 })
 
-test('renames an untitled current workspace with an explicit feature', () => {
+test('titles an untitled workspace with an explicit feature and sets its status label', async () => {
   writePaseoStub()
-  writePaseoAgent({
-    runtimeSessionId: 'claude-session-1',
-    workspaceId: 'wks-1',
-  })
+  writeCliClientId()
+  writePaseoAgent({ runtimeSessionId: 'claude-session-1', workspaceId: 'wks-1' })
   writePaseoWorkspaces([{ title: null, workspaceId: 'wks-1' }])
+  const listen = await startFakeDaemon()
 
   const result = runWorkspace(['--status=active', 'multiprovider-session-naming'], {
     CLAUDE_CODE_SESSION_ID: 'claude-session-1',
+    PASEO_LISTEN: listen,
   })
 
   expect(result.success, result.stderr).toBe(true)
-  expect(result.stdout).toBe('🔴 multiprovider-session-naming\n')
-  expect(paseoCalls()).toEqual([
-    ['workspace', 'rename', 'wks-1', '🔴 multiprovider-session-naming'],
+  expect(result.stdout).toBe('multiprovider-session-naming [active]\n')
+  expect(paseoCalls()).toEqual([['workspace', 'rename', 'wks-1', 'multiprovider-session-naming']])
+  expect(labelCalls()).toEqual([
+    { assigned: true, color: 'red', name: 'active', workspaceId: 'wks-1' },
   ])
+})
+
+test('keeps the title rename when the daemon is unreachable and skips the label', () => {
+  writePaseoStub()
+  writeCliClientId()
+  writePaseoAgent({ nativeHandle: 'codex-thread-1', workspaceId: 'wks-1' })
+  writePaseoWorkspaces([{ title: null, workspaceId: 'wks-1' }])
+
+  const result = runWorkspace(['--status', 'done', 'multiprovider-session-naming'], {
+    CODEX_THREAD_ID: 'codex-thread-1',
+    PASEO_LISTEN: '127.0.0.1:1',
+  })
+
+  expect(result.success, result.stderr).toBe(true)
+  expect(result.stdout).toContain('multiprovider-session-naming [done]')
+  expect(result.stdout).toContain('status label skipped')
+  expect(paseoCalls()).toEqual([['workspace', 'rename', 'wks-1', 'multiprovider-session-naming']])
 })
 
 test('workspace rename fails without an exact current Paseo agent match', () => {
@@ -457,6 +484,45 @@ function writeExecutable(name: string, content: string): void {
   const path = join(bin, name)
   writeFileSync(path, content)
   chmodSync(path, 0o755)
+}
+
+function writeCliClientId(clientId = 'cid_test'): void {
+  const paseoDir = join(home, '.paseo')
+  mkdirSync(paseoDir, { recursive: true })
+  writeFileSync(join(paseoDir, 'cli-client-id'), clientId)
+}
+
+async function startFakeDaemon(preassigned: string[] = []): Promise<string> {
+  const portFile = join(home, 'daemon-port')
+  const recordFile = join(home, 'label-calls.jsonl')
+  daemonProc = Bun.spawn(['bun', fakeDaemon, portFile, recordFile, preassigned.join(',')], {
+    stdout: 'ignore',
+    stderr: 'ignore',
+  })
+
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (existsSync(portFile)) {
+      const port = readFileSync(portFile, 'utf8').trim()
+      if (port.length > 0) return `127.0.0.1:${port}`
+    }
+    await Bun.sleep(20)
+  }
+  throw new Error('fake Paseo daemon did not report a port')
+}
+
+function labelCalls(): Array<{
+  assigned: boolean
+  color: string
+  name: string
+  workspaceId: string
+}> {
+  const recordFile = join(home, 'label-calls.jsonl')
+  if (!existsSync(recordFile)) return []
+  return readFileSync(recordFile, 'utf8')
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
 }
 
 function readCalls(): Array<{

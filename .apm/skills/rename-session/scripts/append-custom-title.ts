@@ -79,7 +79,7 @@ async function main(): Promise<void> {
   if (provider.kind === 'codex') await renameCodexThread(provider.id, customTitle)
   else appendClaudeCustomTitle(discoverClaudeJsonl(provider.id), provider.id, customTitle)
 
-  updatePaseo(provider.id, customTitle, feature, status)
+  updatePaseo(provider.id, customTitle, feature)
   process.stdout.write(`${customTitle}\n`)
 }
 
@@ -329,12 +329,7 @@ function parseJsonRpcLine(
   }
 }
 
-function updatePaseo(
-  providerId: string,
-  sessionName: string,
-  feature: string | undefined,
-  status: SessionStatus,
-): void {
+function updatePaseo(providerId: string, sessionName: string, feature: string | undefined): void {
   try {
     const agent = findPaseoAgent(providerId)
     if (agent === undefined) return
@@ -342,7 +337,7 @@ function updatePaseo(
     runPaseo(['agent', 'update', agent.id, '--name', sessionName])
     if (feature === undefined) return
     if (!isWorkspaceUntitled(agent.workspaceId)) return
-    runPaseo(['workspace', 'rename', agent.workspaceId, `${STATUS_EMOJI[status]} ${feature}`])
+    runPaseo(['workspace', 'rename', agent.workspaceId, feature])
   } catch {
     return
   }
