@@ -1,1 +1,12 @@
 node_modules/
+apm_modules/
+apm.lock.yaml
+
+# APM-generated materialized copies
+.claude/skills/
+.claude/commands/
+.agents/skills/
+
+# APM pack output
+.claude-plugin/
+build/
