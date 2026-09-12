@@ -12,43 +12,36 @@ description: Deploy the lasthaze-homelab NixOS box.
 
 Box addresses: tailnet `lasthaze-homelab.alpine-ulmer.ts.net` / `100.123.237.27`, LAN `192.168.1.48`. Root SSH is keyless from the Mac.
 
-## Routine service change → pull
+## Routing
 
-Edit homelab, then from the homelab repo:
+All `just` commands run from the homelab repo (`~/Development/personal/lasthaze-homelab`).
 
-```
-just deploy
-```
+| Invocation | Recipe | What happens |
+|---|---|---|
+| `/homelab-deploy <filter>` | `just deploy-wait <filter>` | push + trigger + stream build output + container status + logs |
+| `/homelab-deploy dev` | `just dev` | push nixos-rebuild from Mac, no git commit needed |
+| `/homelab-deploy dev test` | `just dev test` | same but `test` instead of `switch` (reverts on reboot) |
+| `/homelab-deploy status` | `just deploy-status` | inspect the last deploy run |
 
-= `git push` + `tailscale ssh lasthaze-homelab 'sudo systemctl start homelab-deploy.service'`. The box's `homelab-deploy.service` (oneshot) resets its own checkout at `/var/lib/homelab-deploy/dotfiles` to `origin/master`, floats homelab, and `nixos-rebuild switch` — **built on the box**. Latency 5–60 s.
+Without args: check `git -C ~/Development/personal/lasthaze-homelab status --porcelain`. If there are uncommitted changes in the homelab repo, warn and suggest `just dev`. If clean, ask for a filter (service name like `powersync`, `adguard`) and run `just deploy-wait <filter>`.
 
+## Pull deploy — `just deploy-wait <filter>`
+
+Routine service changes. Pushes to `main`, triggers the box's `homelab-deploy.service` (oneshot), streams build journal until completion, then reports container status and recent logs for the filtered service.
+
+The box builds from `origin/main`, not the working tree. Only committed+pushed code deploys.
+
+- `just deploy` — push + trigger without waiting (legacy, no feedback).
 - `just trigger` — trigger without pushing (already pushed from GitHub UI / iPhone).
-- `just deploy-status` / `just deploy-logs` — inspect the last run.
 - `homelab-deploy.timer` fires hourly (safety net for pushes made without a trigger).
 
-Only a **`git push` to `main`** deploys — the box builds from `origin`, not your working tree. Keep unfinished work on branches, not `main`; the hourly timer will otherwise ship it.
+## Push deploy — `just dev [action]`
 
-## base/dev iteration (WIP without commit, risky changes) → push
+Dev iteration without committing: builds from the Mac's working tree via `nixos-rebuild --override-input homelab path:.`, offloading the build to the box via `--build-host`.
 
-Host-level changes in dotfiles, or testing uncommitted homelab, build from the Mac. aarch64 can't build x86_64 itself, so offload to the box:
+The recipe handles the **1Password store-ssh gotcha** automatically: `nix run …nixos-rebuild` uses SSH from the nix store, but 1Password ties signing approval to the binary path → `Permission denied`. The recipe opens a system-SSH ControlMaster first and makes nixos-rebuild reuse it via `NIX_SSHOPTS`.
 
-```
-nix run 'nixpkgs/nixos-25.05#nixos-rebuild' -- switch --flake .#lasthaze-homelab \
-  --target-host root@192.168.1.48 --build-host root@192.168.1.48 --fast
-```
-
-- `--override-input homelab path:/Users/yoshintame/Development/personal/lasthaze-homelab` to build against uncommitted homelab.
-- `test` instead of `switch` for networking/ssh/firewall changes — reverts on next boot (manual magic-rollback).
-- `--fast` is required: it skips the local x86_64 rebuild of `nixos-rebuild` itself, which is what makes a plain call fail on aarch64.
-
-**1Password store-ssh gotcha.** `nix run …nixos-rebuild` uses ssh from the nix store; 1Password ties signing approval to the binary path and refuses for the store binary non-interactively → `Permission denied (publickey)`, even though system `ssh root@box` works. Pre-open one system-ssh ControlMaster and make nixos-rebuild reuse it:
-
-```
-CM="$TMPDIR/cm.sock"
-ssh -o ControlMaster=yes -o ControlPath="$CM" -o ControlPersist=900 -fN root@192.168.1.48
-NIX_SSHOPTS="-o ControlPath=$CM -o ControlMaster=no" nix run 'nixpkgs/nixos-25.05#nixos-rebuild' -- switch --flake .#lasthaze-homelab --target-host root@192.168.1.48 --build-host root@192.168.1.48 --fast
-ssh -O exit -o ControlPath="$CM" root@192.168.1.48
-```
+`action` defaults to `switch`. Use `test` for networking/ssh/firewall changes — reverts on next boot (manual magic-rollback).
 
 ## One change, one topology
 
