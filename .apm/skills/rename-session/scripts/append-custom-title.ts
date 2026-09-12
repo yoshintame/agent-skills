@@ -76,11 +76,19 @@ async function main(): Promise<void> {
   validateCompositeName(customTitle)
   const provider = resolveProviderSession(process.env)
 
-  if (provider.kind === 'codex') await renameCodexThread(provider.id, customTitle)
-  else appendClaudeCustomTitle(discoverClaudeJsonl(provider.id), provider.id, customTitle)
+  let previousTitle: string | undefined
+
+  if (provider.kind === 'codex') {
+    await renameCodexThread(provider.id, customTitle)
+  } else {
+    const jsonlPath = discoverClaudeJsonl(provider.id)
+    previousTitle = readCurrentClaudeTitle(jsonlPath)
+    appendClaudeCustomTitle(jsonlPath, provider.id, customTitle)
+  }
 
   updatePaseo(provider.id, customTitle, feature)
-  process.stdout.write(`${customTitle}\n`)
+  const oldDisplay = previousTitle ?? '(unnamed)'
+  process.stdout.write(`${oldDisplay} → ${customTitle}\n`)
 }
 
 function parseArgs(argv: readonly string[]): ParsedArgs {
@@ -208,6 +216,27 @@ function discoverClaudeJsonl(sessionId: string): string {
 
 function hashCwd(cwd: string): string {
   return cwd.replace(/[^a-zA-Z0-9]/g, '-')
+}
+
+function readCurrentClaudeTitle(jsonlPath: string): string | undefined {
+  const content = readFileSync(jsonlPath, 'utf8')
+  let lastTitle: string | undefined
+  for (const line of content.split('\n')) {
+    if (line.length === 0) continue
+    try {
+      const parsed: unknown = JSON.parse(line)
+      if (
+        isRecord(parsed) &&
+        parsed.type === 'custom-title' &&
+        typeof parsed.customTitle === 'string'
+      ) {
+        lastTitle = parsed.customTitle
+      }
+    } catch {
+      continue
+    }
+  }
+  return lastTitle
 }
 
 function appendClaudeCustomTitle(jsonl: string, sessionId: string, customTitle: string): void {
