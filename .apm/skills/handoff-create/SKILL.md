@@ -31,6 +31,10 @@ Reply (no body in chat):
 
 The file is an editable artifact: the user opens it, selects parts, asks for fixes — apply those with `Edit` on the file, do not regenerate.
 
+## Skills referenced in arguments
+
+If the description or arguments mention `/skill-name`, load each via Skill tool before writing the body — you need their conventions to write the handoff correctly. The next session will invoke these skills itself; your job is to reference them accurately (in Goal, Must-read, Conventions), not to execute them now.
+
 ## What goes in the file
 
 From the live conversation, not the session JSONL. Include only blocks that apply, shortest first:
