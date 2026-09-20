@@ -330,6 +330,17 @@ function line(s = ""): string {
   return `${s}\n`
 }
 
+function formatDuration(ms: number): string {
+  const s = Math.floor(ms / 1000)
+  const m = Math.floor(s / 60)
+  const h = Math.floor(m / 60)
+  const d = Math.floor(h / 24)
+  if (d > 0) return `${d}d ${h % 24}h`
+  if (h > 0) return `${h}h ${m % 60}m`
+  if (m > 0) return `${m}m`
+  return `${s}s`
+}
+
 async function report(sessionIdArg: string | null): Promise<string | null> {
   const jsonl = await findSessionJsonl(sessionIdArg)
   if (!jsonl) {
@@ -383,10 +394,14 @@ async function report(sessionIdArg: string | null): Promise<string | null> {
   }
   const heads = await Promise.all([...stampRepos].map(async (r) => `${basename(r)} ${await gitHead(r)}`))
 
+  const nowMs = Date.now()
+  const idleMs = endMs ? nowMs - endMs : null
+
   let out = ""
   out += line(`# Session ${parsed.sessionId}`)
   out += line(`Window: ${startMs ? new Date(startMs).toISOString() : "?"} → ${endMs ? new Date(endMs).toISOString() : "?"}`)
-  out += line(`Reconstructed as-of: ${new Date().toISOString()}`)
+  out += line(`Reconstructed as-of: ${new Date(nowMs).toISOString()}`)
+  if (idleMs !== null) out += line(`Idle: ${formatDuration(idleMs)}`)
   for (const h of heads) out += line(`HEAD at snapshot: ${h}`)
   out += line("⚠ Git facts below are this snapshot. If you are reading this in a session whose current turn is later than the as-of above, re-run the script before trusting any state claim.")
   out += line()
