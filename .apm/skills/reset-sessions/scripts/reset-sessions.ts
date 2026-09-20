@@ -45,17 +45,17 @@ async function reset(all: boolean, dryRun: boolean) {
   }
   const targets = sessions.filter((p) => !spare.has(p.pid))
 
-  console.log(`Сессий найдено: ${sessions.length} (${mb(beforeMem)} MB)`)
-  if (mine) console.log(`Текущая pid=${mine.pid} + поддерево (${spare.size} проц.) — щажу`)
-  else if (!all) console.log(`Текущая сессия не определена (запуск вне сессии) — под нож все`)
+  console.log(`Sessions found: ${sessions.length} (${mb(beforeMem)} MB)`)
+  if (mine) console.log(`Current pid=${mine.pid} + subtree (${spare.size} procs) — sparing`)
+  else if (!all) console.log(`Current session not detected (running outside a session) — targeting all`)
 
   if (targets.length === 0) {
-    console.log("Нечего убивать.")
+    console.log("Nothing to kill.")
     return
   }
 
   if (dryRun) {
-    console.log(`\n[dry-run] Убил бы ${targets.length}:`)
+    console.log(`\n[dry-run] Would kill ${targets.length}:`)
     for (const p of targets) console.log(`  pid=${p.pid}  ${mb(p.rss)} MB`)
     return
   }
@@ -73,26 +73,26 @@ async function reset(all: boolean, dryRun: boolean) {
   for (const p of killed) appendJsonl(KILLS_LOG, { ts, source: "reset", pid: p.pid, rssMb: mb(p.rss) })
 
   console.log(
-    `\nУбито: ${killed.length}/${targets.length}. Освобождено ~${mb(freedMem)} MB. Осталось сессий: ${after.length} (${mb(afterMem)} MB).`,
+    `\nKilled: ${killed.length}/${targets.length}. Freed ~${mb(freedMem)} MB. Remaining sessions: ${after.length} (${mb(afterMem)} MB).`,
   )
-  if (result.orphans.length) console.log(`Добиты осиротевшие дочерние процессы: ${result.orphans.length}`)
-  if (result.stuck.length) console.log(`Не отозвались даже на SIGKILL (зомби/reparent): ${result.stuck.join(", ")}`)
+  if (result.orphans.length) console.log(`Orphaned child processes killed: ${result.orphans.length}`)
+  if (result.stuck.length) console.log(`Unresponsive even after SIGKILL (zombie/reparent): ${result.stuck.join(", ")}`)
 }
 
 function selfSpawn() {
   const sid = process.env.CLAUDE_CODE_SESSION_ID
   if (!sid) {
-    console.log("ok: нет CLAUDE_CODE_SESSION_ID")
+    console.log("ok: no CLAUDE_CODE_SESSION_ID")
     return
   }
   const procs = snapshot()
   const me = currentSession(procs)
   if (!me) {
-    console.log("ok: нет native-binary процесса")
+    console.log("ok: no native-binary process")
     return
   }
   const transcript = findTranscript(sid)
-  if (!transcript) die(`транскрипт ${sid} не найден в ${CLAUDE_DIR}/projects`)
+  if (!transcript) die(`transcript ${sid} not found in ${CLAUDE_DIR}/projects`)
 
   mkdirSync(STATE_DIR, { recursive: true })
   const log = openSync(SELF_LOG, "a")
@@ -105,7 +105,7 @@ function selfSpawn() {
   closeSync(log)
 
   console.log(
-    `Сессия ${sid.slice(0, 8)} (pid=${me.pid}, ${mb(me.rss)} MB) будет убита после конца хода, пока титул 🟢; кап ${SELF_CAP_MS / 60_000} мин. Worker pid=${child.pid}, лог ${SELF_LOG}.`,
+    `Session ${sid.slice(0, 8)} (pid=${me.pid}, ${mb(me.rss)} MB) will be killed after end_turn while title is 🟢; cap ${SELF_CAP_MS / 60_000} min. Worker pid=${child.pid}, log ${SELF_LOG}.`,
   )
 }
 
@@ -142,7 +142,7 @@ async function selfWorker(pid: number, sid: string, start: string, transcript: s
   const procs = snapshot()
   const me = byPid(procs).get(pid)
   if (!me || !isSession(me) || me.start !== start) {
-    log("abort: процесс сессии ушёл или pid переиспользован")
+    log("abort: session process gone or pid reused")
     return
   }
 
@@ -163,21 +163,21 @@ async function selfWorker(pid: number, sid: string, start: string, transcript: s
 const main = defineCommand({
   meta: {
     name: "reset-sessions",
-    description: "Гасит процессы сессий Claude Code (VSCode-расширение): все, кроме текущей, или собственную после конца хода.",
+    description: "Kill Claude Code session processes (VSCode extension): all except current, or self after end of turn.",
   },
   args: {
-    all: { type: "boolean", default: false, description: "Не щадить текущую сессию (запуск вне сессии)" },
-    "dry-run": { type: "boolean", default: false, description: "Показать цели, ничего не трогая" },
+    all: { type: "boolean", default: false, description: "Do not spare the current session (for out-of-session runs)" },
+    "dry-run": { type: "boolean", default: false, description: "Show targets without killing" },
     self: {
       type: "boolean",
       default: false,
-      description: "Убить собственную сессию после конца хода, если титул 🟢 (последний шаг /done)",
+      description: "Kill own session after end of turn if title is 🟢 (last step of /done)",
     },
-    "self-worker": { type: "boolean", default: false, description: "Внутренний режим: отцепленный worker для --self" },
-    pid: { type: "string", description: "(self-worker) pid процесса сессии" },
-    sid: { type: "string", description: "(self-worker) id сессии" },
-    start: { type: "string", description: "(self-worker) lstart процесса сессии" },
-    transcript: { type: "string", description: "(self-worker) путь к JSONL сессии" },
+    "self-worker": { type: "boolean", default: false, description: "Internal: detached worker for --self" },
+    pid: { type: "string", description: "(self-worker) session process pid" },
+    sid: { type: "string", description: "(self-worker) session id" },
+    start: { type: "string", description: "(self-worker) process lstart" },
+    transcript: { type: "string", description: "(self-worker) path to session JSONL" },
   },
   async run({ args }) {
     if (args["self-worker"]) return selfWorker(Number(args.pid), String(args.sid), String(args.start), String(args.transcript))
