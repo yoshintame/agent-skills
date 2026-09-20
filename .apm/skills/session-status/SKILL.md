@@ -54,5 +54,3 @@ _снято: <as-of> · HEAD <репо>@<hash>_
 - Пустую секцию пропусти.
 - `Documentation`, `Code (commits)`, `Non-git / scratch` из скрипта — не отдельные секции в выводе; данные для нарратива.
 - Чужая сессия (UUID, нет контекста): инферируй из subject'ов коммитов и путей; невозможно — флагни и предложи `claude --resume <UUID>`.
-
-**Резюм и sandbox.** Headless запуск (`claude -p --resume <UUID> "/session-status"`) — дозапись в `~/.claude/projects/**` в write-deny: гони с `dangerouslyDisableSandbox: true`. Чужой slug — `(cd <slug-как-путь> && claude --resume …)` либо `session-link`.
