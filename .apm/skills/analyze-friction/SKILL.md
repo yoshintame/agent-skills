@@ -6,8 +6,8 @@ description: Мера фрикшена агента по истории тран
 # /analyze-friction
 
 ```bash
-bun ~/.claude/skills/analyze-friction/scripts/miner.ts               # full scan (~4GB corpus, chunked <=128MB)
-bun ~/.claude/skills/analyze-friction/scripts/miner.ts --rollup-only # reuse last scan, iterate rollups
+bun ~/.claude/skills/analyze-friction/scripts/miner.ts               # полный скан (корпус ~4GB, чанки <=128MB)
+bun ~/.claude/skills/analyze-friction/scripts/miner.ts --rollup-only # переиспользовать последний скан, итерировать роллапы
 ```
 
 Вывод — ранжированные кандидат-диффы конфига, не сырой лог. Единый CTAS по корпусу OOM'ится, поэтому скан чанкуется пофайлово; `--rollup-only` переиспользует `$TMPDIR/friction.duckdb`.
@@ -30,7 +30,7 @@ Violation коррелируется к команде по `tool_use_id` (`asse
 
 ## Вывод — вход для триажа, не авто-дифф
 
-- `violation` — ground truth; `bypass` переоценивает (сессии в `bypassPermissions` ставят флаг профилактически). Ранжируй по violation.
+- `violation` — фактический отказ (эталон); `bypass` переоценивает (сессии в `bypassPermissions` ставят флаг профилактически). Ранжируй по violation.
 - Не всякий `fs-perm-denied` → `allowWrite`:
   - `~/.ssh/**`, `~/.config/gh/**`, `~/.dotfiles/**/settings.json`, `~/.claude/**` — защита работает (expected-deny), не открывать.
   - `net-refused` на `localhost`/`127.0.0.1`/`0.0.0.0`/private-IP — сервис не поднят, не блок песочницы.
