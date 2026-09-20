@@ -81,11 +81,14 @@ async function reset(all: boolean, dryRun: boolean) {
 
 function selfSpawn() {
   const sid = process.env.CLAUDE_CODE_SESSION_ID
-  if (!sid) die("нет CLAUDE_CODE_SESSION_ID — не внутри сессии Claude Code")
+  if (!sid) {
+    console.log("ok: нет CLAUDE_CODE_SESSION_ID")
+    return
+  }
   const procs = snapshot()
   const me = currentSession(procs)
   if (!me) {
-    console.log(`Сессия ${sid.slice(0, 8)} запущена через SDK — нет native-binary процесса. Kill не требуется.`)
+    console.log("ok: нет native-binary процесса")
     return
   }
   const transcript = findTranscript(sid)
