@@ -1,76 +1,76 @@
 ---
 name: homelab-deploy
-description: Deploy the lasthaze-homelab NixOS box.
+description: Деплой lasthaze-homelab NixOS-бокса.
 ---
 
 # homelab-deploy
 
-`lasthaze-homelab` (NixOS OptiPlex, tailnet-only) is built from two repos (dotfiles is public, homelab is private):
+`lasthaze-homelab` (NixOS OptiPlex, tailnet-only) собирается из двух репо (dotfiles публичный, homelab приватный):
 
-- **dotfiles** — `~/.dotfiles`, `git@github.com:yoshintame/dotfiles`. Owns the host: `hosts/lasthaze-homelab/` (`disko.nix`, `deploy.nix`, base). Flake attr `.#lasthaze-homelab`.
-- **homelab** — `~/Development/personal/lasthaze-homelab`, `git@github.com:yoshintame/lasthaze-homelab`. Owns services + infra, consumed by dotfiles as `inputs.homelab`. dotfiles **floats** this input (no pin): every deploy runs `nix flake update homelab`, so the box always rides fresh homelab `main`.
+- **dotfiles** — `~/.dotfiles`, `git@github.com:yoshintame/dotfiles`. Владеет хостом: `hosts/lasthaze-homelab/` (`disko.nix`, `deploy.nix`, base). Flake-атрибут `.#lasthaze-homelab`.
+- **homelab** — `~/Development/personal/lasthaze-homelab`, `git@github.com:yoshintame/lasthaze-homelab`. Владеет сервисами + инфрой, потребляется dotfiles как `inputs.homelab`. dotfiles **не пинит** этот инпут: каждый деплой делает `nix flake update homelab` — бокс всегда едет на свежем homelab `main`.
 
-Box addresses: tailnet `lasthaze-homelab` / `100.123.237.27`, LAN `192.168.1.48`. Root SSH via Tailscale (ACL allows root for `tag:homelab`).
+Адреса: tailnet `lasthaze-homelab` / `100.123.237.27`, LAN `192.168.1.48`. Root SSH через Tailscale (ACL разрешает root для `tag:homelab`).
 
-## Routing
+## Роутинг
 
-All `just` commands run from the homelab repo (`~/Development/personal/lasthaze-homelab`).
+Все `just`-команды запускаются из homelab-репо (`~/Development/personal/lasthaze-homelab`).
 
-| Invocation | Recipe | What happens |
+| Вызов | Рецепт | Что делает |
 |---|---|---|
-| `/homelab-deploy <filter>` | `just deploy-wait <filter>` | push + blocking wait + build log + Docker container status + logs |
-| `/homelab-deploy dev` | `just dev` | push nixos-rebuild from Mac, no git commit needed |
-| `/homelab-deploy dev test` | `just dev test` | same but `test` instead of `switch` (reverts on reboot) |
-| `/homelab-deploy status` | `just deploy-status` | systemctl status of the deploy service |
-| `/homelab-deploy logs` | `just deploy-logs` | last 80 journal entries of the deploy service |
-| `/homelab-deploy ping` | `just ping` | check box is reachable as nix remote builder |
+| `/homelab-deploy <filter>` | `just deploy-wait <filter>` | push + блокирующее ожидание + build log + статус Docker-контейнера + логи |
+| `/homelab-deploy dev` | `just dev` | push nixos-rebuild с Mac'а, без git commit |
+| `/homelab-deploy dev test` | `just dev test` | то же, но `test` вместо `switch` (откатится при ребуте) |
+| `/homelab-deploy status` | `just deploy-status` | systemctl status deploy-сервиса |
+| `/homelab-deploy logs` | `just deploy-logs` | последние 80 записей журнала deploy-сервиса |
+| `/homelab-deploy ping` | `just ping` | проверить доступность бокса как nix remote builder |
 
-Without args: check `git -C ~/Development/personal/lasthaze-homelab status --porcelain`. If there are uncommitted changes in the homelab repo, warn and suggest `just dev`. If clean, ask for a filter (service name) and run `just deploy-wait <filter>`.
+Без аргументов: проверь `git -C ~/Development/personal/lasthaze-homelab status --porcelain`. Есть незакоммиченные изменения — предупреди и предложи `just dev`. Чисто — спроси фильтр (имя сервиса) и запусти `just deploy-wait <filter>`.
 
-## Service types
+## Типы сервисов
 
-`deploy-wait <filter>` shows Docker container status and logs — it only works for **Docker (arion) services**. NixOS-native services need `systemctl`/`journalctl` directly.
+`deploy-wait <filter>` показывает статус и логи Docker-контейнера — работает только для **Docker (arion) сервисов**. NixOS-native сервисы проверяются через `systemctl`/`journalctl` напрямую.
 
-| Service | Type | Check status |
+| Сервис | Тип | Проверка статуса |
 |---|---|---|
 | powersync, actual, postgres, paperless, archivebox | Docker | `just deploy-wait <name>` |
 | adguard, traefik, authelia, cloudflared, grafana, prometheus, loki, alloy, alertmanager | NixOS-native | `tailscale ssh lasthaze-homelab 'systemctl status <unit> --no-pager'` |
 
-For NixOS-native service logs: `tailscale ssh lasthaze-homelab 'journalctl -u <unit> -n 30 --no-pager'`.
+Логи NixOS-native сервиса: `tailscale ssh lasthaze-homelab 'journalctl -u <unit> -n 30 --no-pager'`.
 
 ## Pull deploy — `just deploy-wait <filter>`
 
-Routine service changes. Pushes to `main`, triggers the box's `homelab-deploy.service` (oneshot). The `systemctl start` call blocks until the rebuild completes (5–60 s), then shows the last 20 journal entries (build result) and Docker container status + logs for the filtered service.
+Штатный деплой сервисных изменений. Пушит в `main`, триггерит на боксе `homelab-deploy.service` (oneshot). Вызов `systemctl start` блокируется до завершения сборки (5–60 с), после чего показывает последние 20 записей журнала (результат сборки) и статус + логи Docker-контейнера по фильтру.
 
-The box builds from `origin/main`, not the working tree. Only committed+pushed code deploys.
+Бокс собирает из `origin/main`, не из рабочего дерева. Деплоится только закоммиченный и запушенный код.
 
-- `just deploy` — push + trigger without waiting (legacy, no feedback).
-- `just trigger` — trigger without pushing (already pushed from GitHub UI / iPhone).
-- `homelab-deploy.timer` fires hourly (safety net for pushes made without a trigger).
+- `just deploy` — push + trigger без ожидания (legacy, без feedback'а).
+- `just trigger` — trigger без push'а (уже запушено через GitHub UI / iPhone).
+- `homelab-deploy.timer` стреляет раз в час (подстраховка для push'ей без trigger'а).
 
 ## Push deploy — `just dev [action]`
 
-Dev iteration without committing: builds from the Mac's working tree via `nixos-rebuild --override-input homelab path:.`, offloading the build to the box via `--build-host`. Output is filtered — nix build noise (copying paths, .drv lists, warnings) is suppressed; only the diff, activation messages, and Done line are shown.
+Dev-итерация без коммита: собирает из рабочего дерева Mac'а через `nixos-rebuild --override-input homelab path:.`, делегируя сборку на бокс через `--build-host`. Вывод отфильтрован — nix-шум (copying paths, списки .drv, warnings) подавлен; видны только diff, сообщения активации и Done.
 
-The recipe handles the **1Password store-ssh gotcha** automatically: `nix run …nixos-rebuild` uses SSH from the nix store, but 1Password ties signing approval to the binary path → `Permission denied`. The recipe opens a system-SSH ControlMaster first and makes nixos-rebuild reuse it via `NIX_SSHOPTS`.
+Рецепт автоматически обходит **1Password store-ssh gotcha**: `nix run …nixos-rebuild` использует SSH из nix store, а 1Password привязывает подпись к пути бинарника → `Permission denied`. Рецепт открывает system-SSH ControlMaster и перенаправляет nixos-rebuild через него (`NIX_SSHOPTS`).
 
-`action` defaults to `switch`. Use `test` for networking/ssh/firewall changes — reverts on next boot (manual magic-rollback).
+`action` по умолчанию `switch`. Для сетевых/SSH/firewall-изменений используй `test` — откатится при следующей перезагрузке (ручной magic-rollback).
 
-## One change, one topology
+## Одно изменение, одна топология
 
-Service change → pull only (float, no Mac lock to diverge from `main`). Push is for base/dev iteration with an explicit `--override-input`. Don't drive one homelab change through both — a stale Mac `flake.lock` will silently roll homelab back, and the next timer tick rolls it forward again.
+Сервисное изменение → только pull (float, Mac не расходится с `main`). Push — для base/dev итерации с явным `--override-input`. Не гони одно изменение через обе топологии — устаревший `flake.lock` на Mac'е молча откатит homelab, а следующий тик таймера прокатит обратно.
 
-## Rollback
+## Откат
 
 ```
 tailscale ssh lasthaze-homelab 'sudo nixos-rebuild --rollback switch'
 ```
 
-Or pick a prior generation in systemd-boot. Faster than a version pin (no rebuild); this is why the homelab input floats instead of pinning.
+Или выбери предыдущее поколение в systemd-boot. Быстрее версионного пина (без пересборки) — поэтому homelab-инпут плавает, а не пинится.
 
-## Bootstrap facts (for debugging a broken deploy, not routine)
+## Bootstrap-факты (для отладки сломанного деплоя, не для рутины)
 
-- The box pulls both repos with two read-only **deploy keys** in sops `secrets/homelab/deploy.yaml`, routed by ssh host alias on the box: `github.com` → homelab key, `dotfiles.github.com` → dotfiles key (one deploy key can't cover two repos on GitHub).
-- Trigger auth: Tailscale SSH (`--ssh` on the box) + a tailnet ACL `accept` rule for `tag:homelab` + NOPASSWD sudo scoped to exactly `systemctl start homelab-deploy.service`.
-- The box is also a **nix remote builder** (`ssh-ng://root@lasthaze-homelab` in `/etc/nix/machines`), reachable via Tailscale SSH. Check with `just ping`.
-- age identity is the box's SSH host key (`age1u83d9…`); a reinstall must preserve `/etc/ssh/ssh_host_ed25519_key` via `nixos-anywhere --extra-files`, or the sops enrollment breaks.
+- Бокс тянет оба репо двумя read-only **deploy-ключами** из sops `secrets/homelab/deploy.yaml`, разведёнными по ssh-алиасам: `github.com` → ключ homelab, `dotfiles.github.com` → ключ dotfiles (один deploy key не покрывает два репо на GitHub).
+- Авторизация trigger'а: Tailscale SSH (`--ssh` на боксе) + tailnet ACL `accept` для `tag:homelab` + NOPASSWD sudo ровно на `systemctl start homelab-deploy.service`.
+- Бокс — **nix remote builder** (`ssh-ng://root@lasthaze-homelab` в `/etc/nix/machines`), доступен через Tailscale SSH. Проверить: `just ping`.
+- age identity — SSH host key бокса (`age1u83d9…`); переустановка должна сохранить `/etc/ssh/ssh_host_ed25519_key` через `nixos-anywhere --extra-files`, иначе sops-энроллмент ломается.
