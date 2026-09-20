@@ -13,7 +13,7 @@ description: Reconstruct a stale or paused AI session. Read-only.
    ```
    bun ~/.claude/skills/session-status/scripts/session-status.ts [session-id]
    ```
-   Без аргумента — последняя сессия в `cwd`; полный UUID — конкретная. Шапка несёт `Reconstructed as-of` + `HEAD at snapshot` — перенеси в итог. `moved → <новый путь>` — уцелевший переезд, не потеря. Если пишешь отчёт позже отметки — перегони скрипт.
+   Без аргумента — берёт `CLAUDE_CODE_SESSION_ID` из env (текущая сессия); если env нет — latest по mtime в cwd. Полный UUID — конкретная. Шапка несёт `Reconstructed as-of` + `HEAD at snapshot` — перенеси в итог. `moved → <новый путь>` — уцелевший переезд, не потеря. Если пишешь отчёт позже отметки — перегони скрипт.
 
 2. Перечитать файлы с пометкой `re-read needed`: `git -C <repo> diff <hash> HEAD -- <file>` → точная дельта + жив ли контент сессии. `BYTE-IDENTICAL` не трогай.
 
