@@ -18,7 +18,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
-      - name: Check skill imports
+      - name: Check skill dependencies
         run: bun scripts/check-skill-imports.ts
 
       - run: uv tool install apm-cli

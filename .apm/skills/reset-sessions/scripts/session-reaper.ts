@@ -2,7 +2,7 @@
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { createInterface } from "node:readline"
-import { parseArgs } from "node:util"
+import { defineCommand, runMain } from "citty"
 import {
   appendJsonl,
   children,
@@ -153,19 +153,21 @@ async function reap(idleMinutes: number, dryRun: boolean, verbose: boolean) {
   )
 }
 
-const { values: args } = parseArgs({
-  options: {
-    "idle-minutes": { type: "string", default: "15" },
-    "dry-run": { type: "boolean", default: false },
-    verbose: { type: "boolean", default: false },
-    help: { type: "boolean", default: false },
+const main = defineCommand({
+  meta: {
+    name: "session-reaper",
+    description: "Гасит простаивающие процессы сессий Claude Code (VSCode-расширение) по порогу простоя.",
+  },
+  args: {
+    "idle-minutes": { type: "string", default: "15", description: "Порог простоя в минутах" },
+    "dry-run": { type: "boolean", default: false, description: "Показать вердикты, ничего не трогая" },
+    verbose: { type: "boolean", default: false, description: "Печатать вердикт по каждой сессии" },
+  },
+  run({ args }) {
+    const idle = Number(args["idle-minutes"])
+    if (!Number.isFinite(idle) || idle <= 0) throw new Error(`--idle-minutes: ожидалось положительное число, получено ${args["idle-minutes"]}`)
+    return reap(idle, args["dry-run"], args.verbose)
   },
 })
 
-if (args.help) {
-  console.log("Usage: session-reaper [--idle-minutes <minutes>] [--dry-run] [--verbose] [--help]")
-} else {
-  const idle = Number(args["idle-minutes"])
-  if (!Number.isFinite(idle) || idle <= 0) throw new Error(`--idle-minutes: ожидалось положительное число, получено ${args["idle-minutes"]}`)
-  await reap(idle, args["dry-run"], args.verbose)
-}
+runMain(main)

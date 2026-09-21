@@ -2,6 +2,9 @@
 import { existsSync, readdirSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, extname, join, relative } from "node:path"
+import $ from "dax-sh"
+
+$.setPrintCommand(false)
 
 const PROJECTS = join(homedir(), ".claude", "projects")
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"])
@@ -13,12 +16,6 @@ const CODE_EXT = new Set([
 ])
 const CONFIG_EXT = new Set([".json", ".yaml", ".yml", ".toml", ".lock"])
 const NOISE = ["/node_modules/", "/.next/", "/dist/", "/build/", "/.git/", "/coverage/", "/.turbo/"]
-
-async function git(args: string[]): Promise<{ code: number; stdout: string }> {
-  const proc = Bun.spawn(["git", ...args], { stderr: "ignore" })
-  const stdout = await proc.stdout.text()
-  return { code: await proc.exited, stdout }
-}
 
 type FileClass = "doc" | "code" | "config" | "other"
 type ToolEdit = { filePath: string; timestamp: string; tool: string }
@@ -163,7 +160,7 @@ async function gitToplevel(fileDir: string): Promise<string | null> {
   const dir = nearestExistingDir(fileDir)
   const cached = toplevelCache.get(dir)
   if (cached !== undefined) return cached
-  const res = await git(["-C", dir, "rev-parse", "--show-toplevel"])
+  const res = await $`git -C ${dir} rev-parse --show-toplevel`.noThrow().stdout("piped").stderr("null")
   const top = res.code === 0 ? res.stdout.trim() : null
   toplevelCache.set(dir, top)
   return top
@@ -193,7 +190,7 @@ async function repoRenameMap(repo: string): Promise<Map<string, string>> {
   const cached = renameMapCache.get(repo)
   if (cached) return cached
   const m = new Map<string, string>()
-  const res = await git(["-C", repo, "log", "-M", "--diff-filter=R", "--name-status", "--format="])
+  const res = await $`git -C ${repo} log -M --diff-filter=R --name-status --format=`.noThrow().stdout("piped").stderr("null")
   if (res.code === 0) {
     for (const raw of res.stdout.split("\n")) {
       if (raw[0] !== "R") continue
@@ -245,13 +242,13 @@ async function resolveMoved(absOld: string): Promise<string | null> {
 }
 
 async function gitLogDatesForAdd(repo: string, relpath: string): Promise<number[]> {
-  const res = await git(["-C", repo, "log", "--diff-filter=A", "--format=%cI", "--", relpath])
+  const res = await $`git -C ${repo} log --diff-filter=A --format=%cI -- ${relpath}`.noThrow().stdout("piped").stderr("null")
   if (res.code !== 0) return []
   return res.stdout.split("\n").map((l) => Date.parse(l.trim())).filter((n) => !Number.isNaN(n))
 }
 
 async function gitLogCommitsForPath(repo: string, relpath: string): Promise<Array<{ hash: string; ms: number; iso: string }>> {
-  const res = await git(["-C", repo, "log", "--format=%h%x09%cI", "--", relpath])
+  const res = await $`git -C ${repo} log --format=%h%x09%cI -- ${relpath}`.noThrow().stdout("piped").stderr("null")
   if (res.code !== 0) return []
   const out: Array<{ hash: string; ms: number; iso: string }> = []
   for (const line of res.stdout.split("\n")) {
@@ -264,7 +261,7 @@ async function gitLogCommitsForPath(repo: string, relpath: string): Promise<Arra
 }
 
 async function gitWindowCommits(repo: string, sinceIso: string, untilIso: string): Promise<Array<{ hash: string; subject: string }>> {
-  const res = await git(["-C", repo, "log", `--since=${sinceIso}`, `--until=${untilIso}`, "--format=%h%x09%s"])
+  const res = await $`git -C ${repo} log --since=${sinceIso} --until=${untilIso} --format=%h%x09%s`.noThrow().stdout("piped").stderr("null")
   if (res.code !== 0) return []
   const out: Array<{ hash: string; subject: string }> = []
   for (const line of res.stdout.split("\n")) {
@@ -277,13 +274,13 @@ async function gitWindowCommits(repo: string, sinceIso: string, untilIso: string
 }
 
 async function gitCommitFiles(repo: string, hash: string): Promise<string[]> {
-  const res = await git(["-C", repo, "show", "--name-only", "--format=", hash])
+  const res = await $`git -C ${repo} show --name-only --format= ${hash}`.noThrow().stdout("piped").stderr("null")
   if (res.code !== 0) return []
   return res.stdout.split("\n").map((l) => l.trim()).filter(Boolean)
 }
 
 async function gitHead(repo: string): Promise<string> {
-  const res = await git(["-C", repo, "log", "-1", "--format=%h%x09%cs%x09%s"])
+  const res = await $`git -C ${repo} log -1 --format=%h%x09%cs%x09%s`.noThrow().stdout("piped").stderr("null")
   if (res.code !== 0) return "unknown"
   const [hash, date, subject] = res.stdout.trim().split("\t")
   return `${hash} (${date}) \`${(subject ?? "").slice(0, 60)}\``
