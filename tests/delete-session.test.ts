@@ -244,6 +244,232 @@ test('workspace option refuses a session without a linked Paseo agent', () => {
   expect(existsSync(f.log)).toBe(false)
 })
 
+test('component selection can delete only the provider session', () => {
+  const f = fixture()
+  const transcript = join(f.root, '.claude', 'projects', 'a', `${id}.jsonl`)
+  f.put(transcript)
+  f.put(
+    join(f.root, '.paseo', 'agents', `${agentId}.json`),
+    JSON.stringify({
+      id: agentId,
+      provider: 'claude',
+      persistence: { nativeHandle: id },
+    }),
+  )
+  const dry = f.run([id, '--components', 'session', '--dry-run'])
+  expect(dry.exitCode).toBe(0)
+  expect(dry.stdout.toString()).toContain(`remove ${transcript}`)
+  expect(dry.stdout.toString()).toContain('Paseo agent retained')
+  expect(dry.stdout.toString()).not.toContain(`paseo delete ${agentId}`)
+  const result = f.run([id, '--components', 'session'])
+  expect(result.exitCode).toBe(0)
+  expect(existsSync(transcript)).toBe(false)
+  expect(existsSync(f.log)).toBe(false)
+})
+
+test('component selection can delete only the Paseo agent', () => {
+  const f = fixture()
+  const transcript = join(f.root, '.claude', 'projects', 'a', `${id}.jsonl`)
+  f.put(transcript)
+  f.put(
+    join(f.root, '.paseo', 'agents', `${agentId}.json`),
+    JSON.stringify({
+      id: agentId,
+      provider: 'claude',
+      persistence: { nativeHandle: id },
+    }),
+  )
+  const dry = f.run([id, '--components', 'agent', '--dry-run'])
+  expect(dry.exitCode).toBe(0)
+  expect(dry.stdout.toString()).toContain(`paseo delete ${agentId}`)
+  expect(dry.stdout.toString()).not.toContain(`remove ${transcript}`)
+  const result = f.run([id, '--components', 'agent'])
+  expect(result.exitCode).toBe(0)
+  expect(readFileSync(f.log, 'utf8')).toContain(`delete ${agentId}`)
+  expect(existsSync(transcript)).toBe(true)
+})
+
+test('agent-only selection fails when no linked Paseo agent exists', () => {
+  const f = fixture()
+  f.put(join(f.root, '.claude', 'projects', 'a', `${id}.jsonl`))
+  const result = f.run([id, '--components', 'agent', '--dry-run'])
+  expect(result.exitCode).not.toBe(0)
+  expect(result.stderr.toString()).toContain('no linked Paseo agent')
+  expect(existsSync(f.log)).toBe(false)
+})
+
+test('workspace alone archives without deleting provider session or Paseo agent', () => {
+  const f = fixture()
+  const rollout = join(f.root, '.codex', 'sessions', `rollout-now-${id}.jsonl`)
+  f.put(rollout)
+  f.put(
+    join(f.root, '.paseo', 'agents', `${agentId}.json`),
+    JSON.stringify({
+      id: agentId,
+      provider: 'codex',
+      workspaceId,
+      persistence: { nativeHandle: id },
+    }),
+  )
+  f.put(
+    join(f.root, '.paseo', 'projects', 'workspaces.json'),
+    JSON.stringify([{ workspaceId, archivedAt: null, cwd: '/example/repo' }]),
+  )
+  const dry = f.run([id, '--components', 'workspace', '--dry-run'])
+  expect(dry.exitCode).toBe(0)
+  expect(dry.stdout.toString()).toContain(
+    `paseo workspace archive ${workspaceId}`,
+  )
+  expect(dry.stdout.toString()).toContain('archives its agents')
+  expect(dry.stdout.toString()).not.toContain(`paseo delete ${agentId}`)
+  expect(dry.stdout.toString()).not.toContain(`delete --force ${id}`)
+  const result = f.run([id, '--components', 'workspace'])
+  expect(result.exitCode).toBe(0)
+  expect(readFileSync(f.log, 'utf8')).toContain(
+    `workspace archive ${workspaceId}`,
+  )
+  expect(readFileSync(f.log, 'utf8')).not.toContain('delete ')
+  expect(existsSync(rollout)).toBe(true)
+})
+
+test('workspace component refuses a workspace with an unrelated agent', () => {
+  const f = fixture()
+  f.put(
+    join(f.root, '.paseo', 'agents', `${agentId}.json`),
+    JSON.stringify({
+      id: agentId,
+      provider: 'codex',
+      workspaceId,
+      persistence: { nativeHandle: id },
+    }),
+  )
+  f.put(
+    join(f.root, '.paseo', 'agents', `${otherAgentId}.json`),
+    JSON.stringify({ id: otherAgentId, provider: 'codex', workspaceId }),
+  )
+  const result = f.run([id, '--components', 'workspace'])
+  expect(result.exitCode).not.toBe(0)
+  expect(result.stderr.toString()).toContain(otherAgentId)
+  expect(existsSync(f.log)).toBe(false)
+})
+
+test('session and workspace selection reports the linked agent as archived and retained', () => {
+  const f = fixture()
+  f.put(join(f.root, '.codex', 'sessions', `rollout-now-${id}.jsonl`))
+  f.put(
+    join(f.root, '.paseo', 'agents', `${agentId}.json`),
+    JSON.stringify({
+      id: agentId,
+      provider: 'codex',
+      workspaceId,
+      persistence: { nativeHandle: id },
+    }),
+  )
+  f.put(
+    join(f.root, '.paseo', 'projects', 'workspaces.json'),
+    JSON.stringify([{ workspaceId, archivedAt: null, cwd: '/example/repo' }]),
+  )
+  const result = f.run([id, '--components', 'session,workspace', '--dry-run'])
+  expect(result.exitCode).toBe(0)
+  expect(result.stdout.toString()).toContain('Paseo agent retained')
+  expect(result.stdout.toString()).toContain(
+    'workspace archive will archive it',
+  )
+  expect(result.stdout.toString()).not.toContain(`paseo delete ${agentId}`)
+})
+
+test('active Claude guard only applies when provider session is selected', () => {
+  const f = fixture()
+  const transcript = join(f.root, '.claude', 'projects', 'a', `${id}.jsonl`)
+  f.put(transcript)
+  f.put(
+    join(f.root, '.paseo', 'agents', `${agentId}.json`),
+    JSON.stringify({
+      id: agentId,
+      provider: 'claude',
+      persistence: { nativeHandle: id },
+    }),
+  )
+  f.put(
+    join(f.root, '.claude', 'sessions', `${process.pid}.json`),
+    JSON.stringify({ sessionId: id, pid: process.pid, procStart: 'invalid' }),
+  )
+  const agent = f.run([id, '--components', 'agent'])
+  expect(agent.exitCode).toBe(0)
+  expect(readFileSync(f.log, 'utf8')).toContain(`delete ${agentId}`)
+  expect(existsSync(transcript)).toBe(true)
+  const session = f.run([id, '--components', 'session'])
+  expect(session.exitCode).not.toBe(0)
+  expect(session.stderr.toString()).toContain(
+    'cannot inspect active Claude PID',
+  )
+  expect(existsSync(transcript)).toBe(true)
+})
+
+test('component argument requires an exact nonempty subset and excludes legacy workspace flag', () => {
+  const f = fixture()
+  for (const components of [
+    '',
+    'session,',
+    'session,session',
+    'Session',
+    'session, workspace',
+    'unknown',
+  ]) {
+    const result = f.run([
+      id,
+      '--provider',
+      'claude',
+      '--components',
+      components,
+    ])
+    expect(result.exitCode).not.toBe(0)
+  }
+  const conflicting = f.run([
+    id,
+    '--provider',
+    'claude',
+    '--components',
+    'session',
+    '--archive-workspace',
+  ])
+  expect(conflicting.exitCode).not.toBe(0)
+  expect(existsSync(f.log)).toBe(false)
+})
+
+test('deferred self selection preserves agent-only operation', async () => {
+  const f = fixture()
+  const rollout = join(f.root, '.codex', 'sessions', `rollout-now-${id}.jsonl`)
+  f.put(rollout, '{}\n')
+  f.put(
+    join(f.root, '.paseo', 'agents', `${agentId}.json`),
+    JSON.stringify({
+      id: agentId,
+      provider: 'codex',
+      persistence: { nativeHandle: id },
+    }),
+  )
+  const result = f.run(['--components', 'agent'], {
+    CODEX_THREAD_ID: id,
+    TMPDIR: f.root,
+  })
+  expect(result.exitCode).toBe(0)
+  writeFileSync(
+    rollout,
+    `${readFileSync(rollout, 'utf8')}{"type":"event_msg","payload":{"type":"task_complete"}}\n`,
+  )
+  const deadline = Date.now() + 5000
+  while (
+    Date.now() < deadline &&
+    (!existsSync(f.log) ||
+      !readFileSync(f.log, 'utf8').includes(`delete ${agentId}`))
+  )
+    await Bun.sleep(100)
+  expect(readFileSync(f.log, 'utf8')).toContain(`delete ${agentId}`)
+  expect(readFileSync(f.log, 'utf8')).not.toContain(`delete --force ${id}`)
+  expect(existsSync(rollout)).toBe(true)
+})
+
 test('deferred workspace archive keeps its option through the current turn', async () => {
   const f = fixture()
   const rollout = join(f.root, '.codex', 'sessions', `rollout-now-${id}.jsonl`)

@@ -15,6 +15,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
 
 type Provider = 'claude' | 'codex'
+type Component = 'session' | 'agent' | 'workspace'
 interface PaseoAgent {
   id: string
   workspaceId?: string
@@ -29,6 +30,7 @@ interface Plan {
   id: string
   provider: Provider
   self: boolean
+  components: ReadonlySet<Component>
   artifacts: string[]
   agents: PaseoAgent[]
   workspace?: PaseoWorkspace
@@ -292,18 +294,23 @@ function makePlan(
     id: string
     self: boolean
   },
-  archiveWorkspace = false,
+  components: ReadonlySet<Component>,
 ): Plan {
   const artifacts =
     target.provider === 'claude'
       ? claudeArtifacts(target.id)
       : codexRollouts(target.id)
   const agents = paseoAgents(target.provider, target.id)
+  if (components.size === 1 && components.has('agent') && !agents.length)
+    fail(`no linked Paseo agent for ${target.provider} ${target.id}`)
   return {
     ...target,
+    components,
     artifacts,
     agents,
-    workspace: archiveWorkspace ? linkedWorkspace(agents) : undefined,
+    workspace: components.has('workspace')
+      ? linkedWorkspace(agents)
+      : undefined,
     watchFile: artifacts.find(
       (path) => kind(path) === 'file' && path.endsWith('.jsonl'),
     ),
@@ -314,32 +321,48 @@ function report(plan: Plan, dryRun: boolean): void {
   process.stdout.write(
     `delete-session: ${dryRun ? 'dry run: ' : ''}${plan.provider} ${plan.id}${plan.self ? ' (current session)' : ''}\n`,
   )
-  for (const agent of plan.agents)
-    process.stdout.write(`  paseo delete ${agent.id}\n`)
-  if (plan.provider === 'codex') {
-    process.stdout.write(
-      `  ${codexCommand} delete --force ${plan.id} (may delete descendant threads)\n`,
-    )
-    for (const path of plan.artifacts)
-      process.stdout.write(`    stored: ${path}\n`)
-  } else {
-    for (const path of plan.artifacts)
-      process.stdout.write(`  remove ${path}\n`)
+  if (plan.components.has('agent'))
+    for (const agent of plan.agents)
+      process.stdout.write(`  paseo delete ${agent.id}\n`)
+  if (plan.components.has('session')) {
+    if (plan.provider === 'codex') {
+      process.stdout.write(
+        `  ${codexCommand} delete --force ${plan.id} (may delete descendant threads)\n`,
+      )
+      for (const path of plan.artifacts)
+        process.stdout.write(`    stored: ${path}\n`)
+    } else {
+      for (const path of plan.artifacts)
+        process.stdout.write(`  remove ${path}\n`)
+    }
   }
   if (
+    plan.components.has('session') &&
     !plan.agents.length &&
     !plan.artifacts.length &&
     plan.provider === 'claude'
   )
     process.stdout.write('  no matching local artifacts\n')
-  if (plan.provider === 'claude')
+  if (plan.components.has('session') && plan.provider === 'claude')
     process.stdout.write('  shared history.jsonl is retained\n')
+  if (
+    plan.components.has('session') &&
+    !plan.components.has('agent') &&
+    plan.agents.length
+  )
+    process.stdout.write(
+      `  warning: Paseo agent retained after provider session deletion${plan.workspace ? '; workspace archive will archive it' : ''}\n`,
+    )
   if (plan.workspace) {
     process.stdout.write(`  paseo workspace archive ${plan.workspace.id}\n`)
     process.stdout.write(`    cwd: ${plan.workspace.cwd}\n`)
     if (plan.workspace.ownedWorktree)
       process.stdout.write(
         `    Paseo-owned worktree may be removed: ${plan.workspace.worktreeRoot}\n`,
+      )
+    if (!plan.components.has('agent'))
+      process.stdout.write(
+        '  warning: workspace archive archives its agents without hard deleting them\n',
       )
   }
 }
@@ -388,7 +411,7 @@ function activeClaudePids(id: string): number[] {
     )
     if (result.status !== 0 || !result.stdout.trim())
       throw new Error(
-        `cannot inspect active Claude PID ${pid}: ${result.stderr.trim()}`,
+        `cannot inspect active Claude PID ${pid}: ${result.stderr?.trim() ?? ''}`,
       )
     const procStart = data.procStart
     if (
@@ -435,6 +458,7 @@ function deleteClaude(plan: Plan): void {
 
 async function execute(plan: Plan): Promise<void> {
   if (
+    plan.components.has('session') &&
     plan.provider === 'claude' &&
     !plan.self &&
     activeClaudePids(plan.id).length
@@ -442,19 +466,22 @@ async function execute(plan: Plan): Promise<void> {
     throw new Error(
       `Claude session ${plan.id} is active; close it before deleting`,
     )
-  for (const agent of plan.agents) run(paseoCommand, ['delete', agent.id])
-  if (plan.provider === 'claude') {
-    if (plan.self) await stopClaudePids(plan.id)
-    deleteClaude(plan)
-  } else {
-    try {
-      run(codexCommand, ['delete', '--force', plan.id])
-    } catch (error) {
-      if (!/not found|does not exist|unknown session/i.test(String(error)))
-        throw error
-      process.stdout.write(
-        `delete-session: ${plan.id} is already absent in Codex\n`,
-      )
+  if (plan.components.has('agent'))
+    for (const agent of plan.agents) run(paseoCommand, ['delete', agent.id])
+  if (plan.components.has('session')) {
+    if (plan.provider === 'claude') {
+      if (plan.self) await stopClaudePids(plan.id)
+      deleteClaude(plan)
+    } else {
+      try {
+        run(codexCommand, ['delete', '--force', plan.id])
+      } catch (error) {
+        if (!/not found|does not exist|unknown session/i.test(String(error)))
+          throw error
+        process.stdout.write(
+          `delete-session: ${plan.id} is already absent in Codex\n`,
+        )
+      }
     }
   }
   if (plan.workspace)
@@ -539,7 +566,7 @@ async function deferred(plan: Plan, offset: number): Promise<void> {
         await execute(
           makePlan(
             { provider: plan.provider, id: plan.id, self: true },
-            plan.workspace !== undefined,
+            plan.components,
           ),
         )
         return
@@ -564,7 +591,8 @@ function schedule(plan: Plan): void {
     plan.id,
     '--provider',
     plan.provider,
-    ...(plan.workspace ? ['--archive-workspace'] : []),
+    '--components',
+    [...plan.components].join(','),
   ]
   writeFileSync(
     log,
@@ -593,12 +621,13 @@ const { values, positionals } = parseArgs({
     provider: { type: 'string' },
     'dry-run': { type: 'boolean' },
     'archive-workspace': { type: 'boolean' },
+    components: { type: 'string' },
     help: { type: 'boolean', short: 'h' },
   },
 })
 if (values.help) {
   process.stdout.write(
-    'Usage: bun delete-session.ts [<session-uuid>] [--provider claude|codex] [--dry-run] [--archive-workspace]\n',
+    'Usage: bun delete-session.ts [<session-uuid>] [--provider claude|codex] [--dry-run] [--components session,agent,workspace | --archive-workspace]\n',
   )
   process.exit(0)
 }
@@ -609,13 +638,33 @@ if (
   values.provider !== 'codex'
 )
   fail('--provider must be claude or codex')
+if (values.components !== undefined && values['archive-workspace'])
+  fail('pass --components or --archive-workspace, not both')
+
+function selectedComponents(): ReadonlySet<Component> {
+  if (values.components === undefined)
+    return new Set<Component>(
+      values['archive-workspace']
+        ? ['session', 'agent', 'workspace']
+        : ['session', 'agent'],
+    )
+  const names = values.components.split(',')
+  if (
+    names.some((name) => !['session', 'agent', 'workspace'].includes(name)) ||
+    new Set(names).size !== names.length
+  )
+    fail(
+      '--components must be a nonempty comma-separated subset of session,agent,workspace',
+    )
+  return new Set(names as Component[])
+}
 
 try {
   const target = resolveTarget(
     positionals[0],
     values.provider as Provider | undefined,
   )
-  const plan = makePlan(target, values['archive-workspace'] ?? false)
+  const plan = makePlan(target, selectedComponents())
   report(plan, values['dry-run'] ?? false)
   if (values['dry-run']) process.exit(0)
   const deferredOffset = process.env.DELETE_SESSION_DEFERRED
