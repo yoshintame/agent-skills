@@ -2,7 +2,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, extname, join, relative } from "node:path"
-import $ from "dax-sh"
+import $ from "dax-sh@0.42.0"
 
 $.setPrintCommand(false)
 

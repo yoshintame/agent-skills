@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process"
 import { closeSync, mkdirSync, openSync } from "node:fs"
 import { join } from "node:path"
-import { defineCommand, runMain } from "citty"
+import { defineCommand, runMain } from "citty@0.2.2"
 import {
   appendJsonl,
   byPid,
