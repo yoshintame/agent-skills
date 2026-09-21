@@ -2,7 +2,7 @@
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 import { createInterface } from "node:readline"
-import { defineCommand, runMain } from "citty"
+import { defineCommand, runMain } from "citty@0.2.2"
 import {
   appendJsonl,
   children,

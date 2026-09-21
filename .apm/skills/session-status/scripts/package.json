@@ -1,9 +1,0 @@
-{
-  "name": "session-status",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "dax-sh": "^0.42.0"
-  }
-}
