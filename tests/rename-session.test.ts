@@ -39,13 +39,16 @@ const renameSessionSkill = resolve(
   'rename-session',
   'SKILL.md',
 )
-const fakeDaemon = resolve(import.meta.dir, 'fixtures', 'fake-paseo-daemon.ts')
+const fakeWebSocket = resolve(
+  import.meta.dir,
+  'fixtures',
+  'fake-paseo-websocket.ts',
+)
 
 let cwd: string
 let home: string
 let bin: string
 let calls: string
-let daemonProc: ReturnType<typeof Bun.spawn> | undefined
 
 beforeEach(() => {
   cwd = mkdtempSync(join(tmpdir(), 'rename-session-cwd-'))
@@ -56,8 +59,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  daemonProc?.kill()
-  daemonProc = undefined
   rmSync(cwd, { force: true, recursive: true })
   rmSync(home, { force: true, recursive: true })
 })
@@ -75,10 +76,9 @@ test('rejects a title without a session type', () => {
 
 test('keeps the skill type table synchronized with the script source of truth', () => {
   const skill = readFileSync(renameSessionSkill, 'utf8')
-  const rows = [...skill.matchAll(/^\| `([^`]+)` \| ([^|]+) \|$/gm)].map(([, type, signature]) => [
-    type,
-    signature.trim(),
-  ])
+  const rows = [...skill.matchAll(/^\| `([^`]+)` \| ([^|]+) \|$/gm)].map(
+    ([, type, signature]) => [type, signature.trim()],
+  )
 
   expect(Object.fromEntries(rows)).toEqual(SESSION_TYPE_SIGNATURES)
 })
@@ -96,14 +96,17 @@ test('rejects a prefix outside the closed session type enum', () => {
 
 test('appends a validated name to the exact Claude session JSONL', () => {
   const selected = writeClaudeSession('claude-selected', '{"type":"user"}\n')
-  const other = writeClaudeSession('claude-other', '{"type":"user","recent":true}\n')
+  const other = writeClaudeSession(
+    'claude-other',
+    '{"type":"user","recent":true}\n',
+  )
 
   const result = run(['--status', 'done', 'impl/rename-session-backends'], {
     CLAUDE_CODE_SESSION_ID: 'claude-selected',
   })
 
   expect(result.success, result.stderr).toBe(true)
-  expect(result.stdout).toBe('🟢 impl/rename-session-backends\n')
+  expect(result.stdout).toBe('(unnamed) → 🟢 impl/rename-session-backends\n')
   expect(readFileSync(selected, 'utf8')).toBe(
     '{"type":"user"}\n{"type":"custom-title","sessionId":"claude-selected","customTitle":"🟢 impl/rename-session-backends"}\n',
   )
@@ -119,7 +122,7 @@ test('renames the exact Codex thread through App Server without touching Claude 
   })
 
   expect(result.success, result.stderr).toBe(true)
-  expect(result.stdout).toBe('🟡 groom/rename-session-contract\n')
+  expect(result.stdout).toBe('(unnamed) → 🟡 groom/rename-session-contract\n')
   expect(readFileSync(claudeJsonl, 'utf8')).toBe('{"type":"user"}\n')
   const [call] = readCalls()
   expect(call.args).toEqual(['app-server', '--stdio'])
@@ -154,7 +157,9 @@ test('fails closed when neither provider session ID exists', () => {
   const result = run(['impl/rename-session-backends'])
 
   expect(result.success).toBe(false)
-  expect(result.stderr).toContain('neither CODEX_THREAD_ID nor CLAUDE_CODE_SESSION_ID is set')
+  expect(result.stderr).toContain(
+    'neither CODEX_THREAD_ID nor CLAUDE_CODE_SESSION_ID is set',
+  )
   expect(readFileSync(jsonl, 'utf8')).toBe('{"type":"user"}\n')
 })
 
@@ -168,7 +173,9 @@ test('fails closed when both provider session IDs exist', () => {
   })
 
   expect(result.success).toBe(false)
-  expect(result.stderr).toContain('both CODEX_THREAD_ID and CLAUDE_CODE_SESSION_ID are set')
+  expect(result.stderr).toContain(
+    'both CODEX_THREAD_ID and CLAUDE_CODE_SESSION_ID are set',
+  )
   expect(readFileSync(jsonl, 'utf8')).toBe('{"type":"user"}\n')
   expect(existsSync(calls)).toBe(false)
 })
@@ -180,7 +187,11 @@ test('renames the matching Paseo agent and seeds an untitled workspace', () => {
   writePaseoWorkspaces([{ title: null, workspaceId: 'wks-1' }])
 
   const result = run(
-    ['--feature', 'multiprovider-session-naming', 'impl/rename-session-backends'],
+    [
+      '--feature',
+      'multiprovider-session-naming',
+      'impl/rename-session-backends',
+    ],
     { CODEX_THREAD_ID: 'codex-thread-1' },
   )
 
@@ -197,13 +208,22 @@ test('does not overwrite an existing Paseo workspace title', () => {
   writePaseoAgent({ nativeHandle: 'codex-thread-1', workspaceId: 'wks-1' })
   writePaseoWorkspaces([{ title: '🔴 existing-feature', workspaceId: 'wks-1' }])
 
-  const result = run(['--feature', 'replacement-feature', 'review/rename-session-backends'], {
-    CODEX_THREAD_ID: 'codex-thread-1',
-  })
+  const result = run(
+    ['--feature', 'replacement-feature', 'review/rename-session-backends'],
+    {
+      CODEX_THREAD_ID: 'codex-thread-1',
+    },
+  )
 
   expect(result.success, result.stderr).toBe(true)
   expect(paseoCalls()).toEqual([
-    ['agent', 'update', 'agent-1', '--name', '🔴 review/rename-session-backends'],
+    [
+      'agent',
+      'update',
+      'agent-1',
+      '--name',
+      '🔴 review/rename-session-backends',
+    ],
   ])
 })
 
@@ -230,51 +250,63 @@ test('keeps a successful provider rename when Paseo commands fail', () => {
   writePaseoWorkspaces([{ title: null, workspaceId: 'wks-1' }])
 
   const result = run(
-    ['--feature', 'multiprovider-session-naming', 'impl/rename-session-backends'],
+    [
+      '--feature',
+      'multiprovider-session-naming',
+      'impl/rename-session-backends',
+    ],
     { CODEX_THREAD_ID: 'codex-thread-1', TEST_FAIL_PASEO: '1' },
   )
 
   expect(result.success, result.stderr).toBe(true)
-  expect(result.stdout).toBe('🔴 impl/rename-session-backends\n')
+  expect(result.stdout).toBe('(unnamed) → 🔴 impl/rename-session-backends\n')
   expect(paseoCalls()).toHaveLength(2)
 })
 
-test('drops the emoji from the title and swaps the status label for the current workspace', async () => {
+test('drops the emoji from the title and swaps the status label for the current workspace', () => {
   writePaseoStub()
   writeCliClientId()
   writePaseoAgent({ nativeHandle: 'codex-thread-1', workspaceId: 'wks-1' })
-  writePaseoWorkspaces([{ title: '🔴 multiprovider-session-naming', workspaceId: 'wks-1' }])
-  const listen = await startFakeDaemon(['wks-1:active'])
-
+  writePaseoWorkspaces([
+    { title: '🔴 multiprovider-session-naming', workspaceId: 'wks-1' },
+  ])
   const result = runWorkspace(['--status', 'done'], {
     CODEX_THREAD_ID: 'codex-thread-1',
-    PASEO_LISTEN: listen,
+    ...fakeSocketEnv(['wks-1:active']),
   })
 
   expect(result.success, result.stderr).toBe(true)
   expect(result.stdout).toBe('multiprovider-session-naming [done]\n')
-  expect(paseoCalls()).toEqual([['workspace', 'rename', 'wks-1', 'multiprovider-session-naming']])
+  expect(paseoCalls()).toEqual([
+    ['workspace', 'rename', 'wks-1', 'multiprovider-session-naming'],
+  ])
   expect(labelCalls()).toEqual([
     { assigned: true, color: 'emerald', name: 'done', workspaceId: 'wks-1' },
     { assigned: false, color: 'red', name: 'active', workspaceId: 'wks-1' },
   ])
 })
 
-test('titles an untitled workspace with an explicit feature and sets its status label', async () => {
+test('titles an untitled workspace with an explicit feature and sets its status label', () => {
   writePaseoStub()
   writeCliClientId()
-  writePaseoAgent({ runtimeSessionId: 'claude-session-1', workspaceId: 'wks-1' })
-  writePaseoWorkspaces([{ title: null, workspaceId: 'wks-1' }])
-  const listen = await startFakeDaemon()
-
-  const result = runWorkspace(['--status=active', 'multiprovider-session-naming'], {
-    CLAUDE_CODE_SESSION_ID: 'claude-session-1',
-    PASEO_LISTEN: listen,
+  writePaseoAgent({
+    runtimeSessionId: 'claude-session-1',
+    workspaceId: 'wks-1',
   })
+  writePaseoWorkspaces([{ title: null, workspaceId: 'wks-1' }])
+  const result = runWorkspace(
+    ['--status=active', 'multiprovider-session-naming'],
+    {
+      CLAUDE_CODE_SESSION_ID: 'claude-session-1',
+      ...fakeSocketEnv(),
+    },
+  )
 
   expect(result.success, result.stderr).toBe(true)
   expect(result.stdout).toBe('multiprovider-session-naming [active]\n')
-  expect(paseoCalls()).toEqual([['workspace', 'rename', 'wks-1', 'multiprovider-session-naming']])
+  expect(paseoCalls()).toEqual([
+    ['workspace', 'rename', 'wks-1', 'multiprovider-session-naming'],
+  ])
   expect(labelCalls()).toEqual([
     { assigned: true, color: 'red', name: 'active', workspaceId: 'wks-1' },
   ])
@@ -286,15 +318,20 @@ test('keeps the title rename when the daemon is unreachable and skips the label'
   writePaseoAgent({ nativeHandle: 'codex-thread-1', workspaceId: 'wks-1' })
   writePaseoWorkspaces([{ title: null, workspaceId: 'wks-1' }])
 
-  const result = runWorkspace(['--status', 'done', 'multiprovider-session-naming'], {
-    CODEX_THREAD_ID: 'codex-thread-1',
-    PASEO_LISTEN: '127.0.0.1:1',
-  })
+  const result = runWorkspace(
+    ['--status', 'done', 'multiprovider-session-naming'],
+    {
+      CODEX_THREAD_ID: 'codex-thread-1',
+      PASEO_LISTEN: '127.0.0.1:1',
+    },
+  )
 
   expect(result.success, result.stderr).toBe(true)
   expect(result.stdout).toContain('multiprovider-session-naming [done]')
   expect(result.stdout).toContain('status label skipped')
-  expect(paseoCalls()).toEqual([['workspace', 'rename', 'wks-1', 'multiprovider-session-naming']])
+  expect(paseoCalls()).toEqual([
+    ['workspace', 'rename', 'wks-1', 'multiprovider-session-naming'],
+  ])
 })
 
 test('workspace rename fails without an exact current Paseo agent match', () => {
@@ -306,7 +343,9 @@ test('workspace rename fails without an exact current Paseo agent match', () => 
   })
 
   expect(result.success).toBe(false)
-  expect(result.stderr).toContain('no Paseo agent matches the current provider session')
+  expect(result.stderr).toContain(
+    'no Paseo agent matches the current provider session',
+  )
   expect(existsSync(calls)).toBe(false)
 })
 
@@ -332,7 +371,9 @@ test('workspace rename rejects ambiguous Paseo agent matches', () => {
   })
 
   expect(result.success).toBe(false)
-  expect(result.stderr).toContain('no Paseo agent matches the current provider session')
+  expect(result.stderr).toContain(
+    'no Paseo agent matches the current provider session',
+  )
   expect(existsSync(calls)).toBe(false)
 })
 
@@ -385,7 +426,10 @@ function runWorkspace(
   delete env.CLAUDE_CODE_SESSION_ID
   delete env.CODEX_THREAD_ID
 
-  const result = Bun.spawnSync(['bun', workspaceScript, ...args], {
+  const command = providerEnv.PASEO_TEST_LABEL_CALLS
+    ? ['bun', '--preload', fakeWebSocket, workspaceScript, ...args]
+    : ['bun', workspaceScript, ...args]
+  const result = Bun.spawnSync(command, {
     cwd,
     env: {
       ...env,
@@ -466,7 +510,8 @@ function writePaseoAgent({
     JSON.stringify({
       id: agentId,
       persistence: nativeHandle === undefined ? {} : { nativeHandle },
-      runtimeInfo: runtimeSessionId === undefined ? {} : { sessionId: runtimeSessionId },
+      runtimeInfo:
+        runtimeSessionId === undefined ? {} : { sessionId: runtimeSessionId },
       workspaceId,
     }),
   )
@@ -477,7 +522,10 @@ function writePaseoWorkspaces(
 ): void {
   const projectsDir = join(home, '.paseo', 'projects')
   mkdirSync(projectsDir, { recursive: true })
-  writeFileSync(join(projectsDir, 'workspaces.json'), JSON.stringify(workspaces))
+  writeFileSync(
+    join(projectsDir, 'workspaces.json'),
+    JSON.stringify(workspaces),
+  )
 }
 
 function writeExecutable(name: string, content: string): void {
@@ -492,22 +540,12 @@ function writeCliClientId(clientId = 'cid_test'): void {
   writeFileSync(join(paseoDir, 'cli-client-id'), clientId)
 }
 
-async function startFakeDaemon(preassigned: string[] = []): Promise<string> {
-  const portFile = join(home, 'daemon-port')
-  const recordFile = join(home, 'label-calls.jsonl')
-  daemonProc = Bun.spawn(['bun', fakeDaemon, portFile, recordFile, preassigned.join(',')], {
-    stdout: 'ignore',
-    stderr: 'ignore',
-  })
-
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (existsSync(portFile)) {
-      const port = readFileSync(portFile, 'utf8').trim()
-      if (port.length > 0) return `127.0.0.1:${port}`
-    }
-    await Bun.sleep(20)
+function fakeSocketEnv(preassigned: string[] = []): Record<string, string> {
+  return {
+    PASEO_LISTEN: '127.0.0.1:1',
+    PASEO_TEST_LABEL_CALLS: join(home, 'label-calls.jsonl'),
+    PASEO_TEST_PREASSIGNED: preassigned.join(','),
   }
-  throw new Error('fake Paseo daemon did not report a port')
 }
 
 function labelCalls(): Array<{
