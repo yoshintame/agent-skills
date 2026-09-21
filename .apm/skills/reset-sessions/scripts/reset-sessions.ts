@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process"
 import { closeSync, mkdirSync, openSync } from "node:fs"
 import { join } from "node:path"
-import { defineCommand, runMain } from "citty"
+import { parseArgs } from "node:util"
 import {
   appendJsonl,
   byPid,
@@ -160,30 +160,26 @@ async function selfWorker(pid: number, sid: string, start: string, transcript: s
   log(`killed (${reason}) rss=${mb(me.rss)} MB orphans=${result.orphans.length} stuck=${result.stuck.length}`)
 }
 
-const main = defineCommand({
-  meta: {
-    name: "reset-sessions",
-    description: "Kill Claude Code session processes (VSCode extension): all except current, or self after end of turn.",
-  },
-  args: {
-    all: { type: "boolean", default: false, description: "Do not spare the current session (for out-of-session runs)" },
-    "dry-run": { type: "boolean", default: false, description: "Show targets without killing" },
-    self: {
-      type: "boolean",
-      default: false,
-      description: "Kill own session after end of turn if title is 🟢 (last step of /done)",
-    },
-    "self-worker": { type: "boolean", default: false, description: "Internal: detached worker for --self" },
-    pid: { type: "string", description: "(self-worker) session process pid" },
-    sid: { type: "string", description: "(self-worker) session id" },
-    start: { type: "string", description: "(self-worker) process lstart" },
-    transcript: { type: "string", description: "(self-worker) path to session JSONL" },
-  },
-  async run({ args }) {
-    if (args["self-worker"]) return selfWorker(Number(args.pid), String(args.sid), String(args.start), String(args.transcript))
-    if (args.self) return selfSpawn()
-    return reset(args.all, args["dry-run"])
+const { values: args } = parseArgs({
+  options: {
+    all: { type: "boolean", default: false },
+    "dry-run": { type: "boolean", default: false },
+    self: { type: "boolean", default: false },
+    "self-worker": { type: "boolean", default: false },
+    pid: { type: "string" },
+    sid: { type: "string" },
+    start: { type: "string" },
+    transcript: { type: "string" },
+    help: { type: "boolean", default: false },
   },
 })
 
-runMain(main)
+if (args.help) {
+  console.log("Usage: reset-sessions [--all] [--dry-run] [--self] [--help]")
+} else if (args["self-worker"]) {
+  await selfWorker(Number(args.pid), String(args.sid), String(args.start), String(args.transcript))
+} else if (args.self) {
+  selfSpawn()
+} else {
+  await reset(args.all, args["dry-run"])
+}
