@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -17,6 +17,14 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - run: uv tool install apm-cli
+
+      - name: Read version from apm.yml
+        id: version
+        run: |
+          version=$(grep '^version:' apm.yml | head -1 | awk '{print $2}')
+          sha=$(git rev-parse --short HEAD)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}+${sha}" >> "$GITHUB_OUTPUT"
 
       - name: Build APM bundle
         run: apm pack --force
@@ -30,12 +38,13 @@ jobs:
             (cd .apm/skills && zip -r "../../$out/$name.zip" "$name/")
           done
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: apm-bundle
-          path: build/agent-skills-*/
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: claude-ai-skills
-          path: build/claude-ai-skills/
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          gh release create "$tag" \
+            --title "Build ${{ steps.version.outputs.version }} (${{ github.sha }})" \
+            --notes "Auto-built from $(git log -1 --format='%s') ($(git rev-parse --short HEAD))" \
+            --latest \
+            build/claude-ai-skills/*.zip
