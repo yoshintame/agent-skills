@@ -11,16 +11,27 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
 
 type Provider = 'claude' | 'codex'
+interface PaseoAgent {
+  id: string
+  workspaceId?: string
+}
+interface PaseoWorkspace {
+  id: string
+  cwd: string
+  ownedWorktree: boolean
+  worktreeRoot?: string
+}
 interface Plan {
   id: string
   provider: Provider
   self: boolean
   artifacts: string[]
-  agents: string[]
+  agents: PaseoAgent[]
+  workspace?: PaseoWorkspace
   watchFile?: string
 }
 
@@ -128,8 +139,8 @@ function codexRollouts(id: string): string[] {
   return paths.sort()
 }
 
-function paseoAgents(provider: Provider, id: string): string[] {
-  const ids = new Set<string>()
+function paseoAgents(provider: Provider, id: string): PaseoAgent[] {
+  const agentsById = new Map<string, PaseoAgent>()
   walk(paseoRoot, (path, entryKind) => {
     if (entryKind !== 'file' || !path.endsWith('.json')) return
     let value: unknown
@@ -151,10 +162,67 @@ function paseoAgents(provider: Provider, id: string): string[] {
     ) {
       if (typeof data.id !== 'string' || !uuidRe.test(data.id))
         fail(`invalid Paseo agent ID in ${path}`)
-      ids.add(data.id)
+      const workspaceId =
+        typeof data.workspaceId === 'string' ? data.workspaceId : undefined
+      const previous = agentsById.get(data.id)
+      if (
+        previous?.workspaceId !== undefined &&
+        previous.workspaceId !== workspaceId
+      )
+        fail(`conflicting Paseo workspace IDs for agent ${data.id}`)
+      agentsById.set(data.id, { id: data.id, workspaceId })
     }
   })
-  return [...ids].sort()
+  return [...agentsById.values()].sort((a, b) => a.id.localeCompare(b.id))
+}
+
+function linkedWorkspace(agents: PaseoAgent[]): PaseoWorkspace {
+  if (!agents.length) fail('--archive-workspace requires a linked Paseo agent')
+  const workspaceIds = new Set(agents.map((agent) => agent.workspaceId))
+  if (workspaceIds.size !== 1 || workspaceIds.has(undefined))
+    fail('--archive-workspace requires one unambiguous Paseo workspace ID')
+  const id = [...workspaceIds][0]!
+  const selectedIds = new Set(agents.map((agent) => agent.id))
+  const peers: string[] = []
+  walk(paseoRoot, (path, entryKind) => {
+    if (entryKind !== 'file' || !path.endsWith('.json')) return
+    let value: unknown
+    try {
+      value = JSON.parse(readFileSync(path, 'utf8'))
+    } catch {
+      fail(`cannot verify workspace agents: invalid JSON in ${path}`)
+    }
+    const data = record(value)
+    if (data.workspaceId !== id) return
+    if (typeof data.id !== 'string')
+      fail(`cannot verify workspace agents: missing ID in ${path}`)
+    if (!selectedIds.has(data.id)) peers.push(data.id)
+  })
+  if (peers.length)
+    fail(`workspace ${id} has other Paseo agents: ${peers.sort().join(', ')}`)
+  const path = join(dirname(paseoRoot), 'projects', 'workspaces.json')
+  let value: unknown
+  try {
+    value = JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    fail(`cannot read Paseo workspaces at ${path}`)
+  }
+  if (!Array.isArray(value)) fail(`invalid Paseo workspaces at ${path}`)
+  const matches = value.filter(
+    (entry) => isRecord(entry) && entry.workspaceId === id,
+  )
+  if (matches.length !== 1)
+    fail(`workspace ${id} is not uniquely registered in Paseo`)
+  const data = record(matches[0])
+  if (data.archivedAt != null) fail(`workspace ${id} is already archived`)
+  if (typeof data.cwd !== 'string' || !data.cwd)
+    fail(`workspace ${id} has no valid cwd`)
+  const ownedWorktree = data.isPaseoOwnedWorktree === true
+  const worktreeRoot =
+    typeof data.worktreeRoot === 'string' ? data.worktreeRoot : undefined
+  if (ownedWorktree && !worktreeRoot)
+    fail(`Paseo-owned workspace ${id} has no worktree root`)
+  return { id, cwd: data.cwd, ownedWorktree, worktreeRoot }
 }
 
 function environmentSessions(): Array<{ provider: Provider; id: string }> {
@@ -218,19 +286,24 @@ function resolveTarget(
   }
 }
 
-function makePlan(target: {
-  provider: Provider
-  id: string
-  self: boolean
-}): Plan {
+function makePlan(
+  target: {
+    provider: Provider
+    id: string
+    self: boolean
+  },
+  archiveWorkspace = false,
+): Plan {
   const artifacts =
     target.provider === 'claude'
       ? claudeArtifacts(target.id)
       : codexRollouts(target.id)
+  const agents = paseoAgents(target.provider, target.id)
   return {
     ...target,
     artifacts,
-    agents: paseoAgents(target.provider, target.id),
+    agents,
+    workspace: archiveWorkspace ? linkedWorkspace(agents) : undefined,
     watchFile: artifacts.find(
       (path) => kind(path) === 'file' && path.endsWith('.jsonl'),
     ),
@@ -241,7 +314,8 @@ function report(plan: Plan, dryRun: boolean): void {
   process.stdout.write(
     `delete-session: ${dryRun ? 'dry run: ' : ''}${plan.provider} ${plan.id}${plan.self ? ' (current session)' : ''}\n`,
   )
-  for (const id of plan.agents) process.stdout.write(`  paseo delete ${id}\n`)
+  for (const agent of plan.agents)
+    process.stdout.write(`  paseo delete ${agent.id}\n`)
   if (plan.provider === 'codex') {
     process.stdout.write(
       `  ${codexCommand} delete --force ${plan.id} (may delete descendant threads)\n`,
@@ -260,6 +334,14 @@ function report(plan: Plan, dryRun: boolean): void {
     process.stdout.write('  no matching local artifacts\n')
   if (plan.provider === 'claude')
     process.stdout.write('  shared history.jsonl is retained\n')
+  if (plan.workspace) {
+    process.stdout.write(`  paseo workspace archive ${plan.workspace.id}\n`)
+    process.stdout.write(`    cwd: ${plan.workspace.cwd}\n`)
+    if (plan.workspace.ownedWorktree)
+      process.stdout.write(
+        `    Paseo-owned worktree may be removed: ${plan.workspace.worktreeRoot}\n`,
+      )
+  }
 }
 
 function run(command: string, args: string[]): void {
@@ -360,7 +442,7 @@ async function execute(plan: Plan): Promise<void> {
     throw new Error(
       `Claude session ${plan.id} is active; close it before deleting`,
     )
-  for (const agent of plan.agents) run(paseoCommand, ['delete', agent])
+  for (const agent of plan.agents) run(paseoCommand, ['delete', agent.id])
   if (plan.provider === 'claude') {
     if (plan.self) await stopClaudePids(plan.id)
     deleteClaude(plan)
@@ -375,6 +457,8 @@ async function execute(plan: Plan): Promise<void> {
       )
     }
   }
+  if (plan.workspace)
+    run(paseoCommand, ['workspace', 'archive', plan.workspace.id])
 }
 
 async function appendedEvents(
@@ -453,7 +537,10 @@ async function deferred(plan: Plan, offset: number): Promise<void> {
       completedAt ??= Date.now()
       if (Date.now() - completedAt >= 2000) {
         await execute(
-          makePlan({ provider: plan.provider, id: plan.id, self: true }),
+          makePlan(
+            { provider: plan.provider, id: plan.id, self: true },
+            plan.workspace !== undefined,
+          ),
         )
         return
       }
@@ -472,7 +559,13 @@ function schedule(plan: Plan): void {
     `delete-session-${plan.id}.log`,
   )
   const command = process.execPath
-  const args = [import.meta.path, plan.id, '--provider', plan.provider]
+  const args = [
+    import.meta.path,
+    plan.id,
+    '--provider',
+    plan.provider,
+    ...(plan.workspace ? ['--archive-workspace'] : []),
+  ]
   writeFileSync(
     log,
     `delete-session: waiting for ${plan.provider} ${plan.id} to finish\n`,
@@ -499,12 +592,13 @@ const { values, positionals } = parseArgs({
   options: {
     provider: { type: 'string' },
     'dry-run': { type: 'boolean' },
+    'archive-workspace': { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
   },
 })
 if (values.help) {
   process.stdout.write(
-    'Usage: bun delete-session.ts [<session-uuid>] [--provider claude|codex] [--dry-run]\n',
+    'Usage: bun delete-session.ts [<session-uuid>] [--provider claude|codex] [--dry-run] [--archive-workspace]\n',
   )
   process.exit(0)
 }
@@ -521,7 +615,7 @@ try {
     positionals[0],
     values.provider as Provider | undefined,
   )
-  const plan = makePlan(target)
+  const plan = makePlan(target, values['archive-workspace'] ?? false)
   report(plan, values['dry-run'] ?? false)
   if (values['dry-run']) process.exit(0)
   const deferredOffset = process.env.DELETE_SESSION_DEFERRED

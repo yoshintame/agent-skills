@@ -26,6 +26,7 @@ const script = join(
 const id = '12345678-1234-4234-8234-123456789abc'
 const agentId = '87654321-4321-4321-8321-cba987654321'
 const otherAgentId = '87654321-4321-4321-8321-cba987654322'
+const workspaceId = 'wks_1234567890abcdef'
 const roots: string[] = []
 
 afterEach(() => {
@@ -159,6 +160,126 @@ test('Codex uses native delete and provider ambiguity requires override', () => 
   expect(result.exitCode).toBe(0)
   expect(readFileSync(f.log, 'utf8')).toContain(`delete --force ${id}`)
   expect(existsSync(claude)).toBe(true)
+})
+
+test('workspace option archives the linked Paseo workspace after deleting the session', () => {
+  const f = fixture()
+  f.put(join(f.root, '.codex', 'sessions', `rollout-now-${id}.jsonl`))
+  f.put(
+    join(f.root, '.paseo', 'agents', `${agentId}.json`),
+    JSON.stringify({
+      id: agentId,
+      provider: 'codex',
+      workspaceId,
+      persistence: { nativeHandle: id },
+    }),
+  )
+  f.put(
+    join(f.root, '.paseo', 'projects', 'workspaces.json'),
+    JSON.stringify([
+      {
+        workspaceId,
+        archivedAt: null,
+        cwd: '/example/worktree',
+        worktreeRoot: '/example/worktree',
+        isPaseoOwnedWorktree: true,
+      },
+    ]),
+  )
+  const dry = f.run([
+    id,
+    '--provider',
+    'codex',
+    '--archive-workspace',
+    '--dry-run',
+  ])
+  expect(dry.exitCode).toBe(0)
+  expect(dry.stdout.toString()).toContain(
+    `paseo workspace archive ${workspaceId}`,
+  )
+  expect(dry.stdout.toString()).toContain(
+    'Paseo-owned worktree may be removed: /example/worktree',
+  )
+  expect(existsSync(f.log)).toBe(false)
+  const result = f.run([id, '--provider', 'codex', '--archive-workspace'])
+  expect(result.exitCode).toBe(0)
+  const mock = realpathSync(join(f.root, 'mock.ts'))
+  expect(readFileSync(f.log, 'utf8')).toBe(
+    `${mock} delete ${agentId}\n${mock} delete --force ${id}\n${mock} workspace archive ${workspaceId}\n`,
+  )
+})
+
+test('workspace option refuses a workspace shared with another Paseo agent', () => {
+  const f = fixture()
+  f.put(join(f.root, '.codex', 'sessions', `rollout-now-${id}.jsonl`))
+  f.put(
+    join(f.root, '.paseo', 'agents', `${agentId}.json`),
+    JSON.stringify({
+      id: agentId,
+      provider: 'codex',
+      workspaceId,
+      persistence: { nativeHandle: id },
+    }),
+  )
+  f.put(
+    join(f.root, '.paseo', 'agents', `${otherAgentId}.json`),
+    JSON.stringify({ id: otherAgentId, provider: 'claude', workspaceId }),
+  )
+  f.put(
+    join(f.root, '.paseo', 'projects', 'workspaces.json'),
+    JSON.stringify([{ workspaceId, archivedAt: null, cwd: '/example/repo' }]),
+  )
+  const result = f.run([id, '--provider', 'codex', '--archive-workspace'])
+  expect(result.exitCode).not.toBe(0)
+  expect(result.stderr.toString()).toContain(otherAgentId)
+  expect(existsSync(f.log)).toBe(false)
+})
+
+test('workspace option refuses a session without a linked Paseo agent', () => {
+  const f = fixture()
+  f.put(join(f.root, '.codex', 'sessions', `rollout-now-${id}.jsonl`))
+  const result = f.run([id, '--provider', 'codex', '--archive-workspace'])
+  expect(result.exitCode).not.toBe(0)
+  expect(result.stderr.toString()).toContain('requires a linked Paseo agent')
+  expect(existsSync(f.log)).toBe(false)
+})
+
+test('deferred workspace archive keeps its option through the current turn', async () => {
+  const f = fixture()
+  const rollout = join(f.root, '.codex', 'sessions', `rollout-now-${id}.jsonl`)
+  f.put(rollout, '{}\n')
+  f.put(
+    join(f.root, '.paseo', 'agents', `${agentId}.json`),
+    JSON.stringify({
+      id: agentId,
+      provider: 'codex',
+      workspaceId,
+      persistence: { nativeHandle: id },
+    }),
+  )
+  f.put(
+    join(f.root, '.paseo', 'projects', 'workspaces.json'),
+    JSON.stringify([{ workspaceId, archivedAt: null, cwd: '/example/repo' }]),
+  )
+  const result = f.run(['--archive-workspace'], {
+    CODEX_THREAD_ID: id,
+    TMPDIR: f.root,
+  })
+  expect(result.exitCode).toBe(0)
+  writeFileSync(
+    rollout,
+    `${readFileSync(rollout, 'utf8')}{"type":"event_msg","payload":{"type":"task_complete"}}\n`,
+  )
+  const deadline = Date.now() + 5000
+  while (
+    Date.now() < deadline &&
+    (!existsSync(f.log) ||
+      !readFileSync(f.log, 'utf8').includes(`workspace archive ${workspaceId}`))
+  )
+    await Bun.sleep(100)
+  expect(readFileSync(f.log, 'utf8')).toContain(
+    `workspace archive ${workspaceId}`,
+  )
 })
 
 test('symlinked project trees are never traversed', () => {
