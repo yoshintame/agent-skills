@@ -1,0 +1,41 @@
+name: Build skill packs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - run: uv tool install apm-cli
+
+      - name: Build APM bundle
+        run: apm pack --force
+
+      - name: Build individual skill zips for claude.ai
+        run: |
+          out=build/claude-ai-skills
+          mkdir -p "$out"
+          for dir in .apm/skills/*/; do
+            name=$(basename "$dir")
+            (cd .apm/skills && zip -r "../../$out/$name.zip" "$name/")
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apm-bundle
+          path: build/agent-skills-*/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-ai-skills
+          path: build/claude-ai-skills/
