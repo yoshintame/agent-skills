@@ -437,6 +437,14 @@ test('component argument requires an exact nonempty subset and excludes legacy w
   expect(existsSync(f.log)).toBe(false)
 })
 
+test('CLI rejects an extra positional argument', () => {
+  const f = fixture()
+  const result = f.run([id, 'unexpected', '--provider', 'codex'])
+  expect(result.exitCode).not.toBe(0)
+  expect(result.stderr.toString()).toContain('at most one session UUID')
+  expect(existsSync(f.log)).toBe(false)
+})
+
 test('deferred self selection preserves agent-only operation', async () => {
   const f = fixture()
   const rollout = join(f.root, '.codex', 'sessions', `rollout-now-${id}.jsonl`)

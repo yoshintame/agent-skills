@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "citty": "0.2.2",
     "dax-sh": "^0.42.0"
   },
   "devDependencies": {

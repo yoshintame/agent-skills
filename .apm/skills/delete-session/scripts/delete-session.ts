@@ -12,7 +12,10 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
-import { parseArgs } from 'node:util'
+import { defineCommand, runMain } from 'citty@0.2.2'
+import $ from 'dax-sh@0.42.0'
+
+$.setPrintCommand(false)
 
 type Provider = 'claude' | 'codex'
 type Component = 'session' | 'agent' | 'workspace'
@@ -367,15 +370,11 @@ function report(plan: Plan, dryRun: boolean): void {
   }
 }
 
-function run(command: string, args: string[]): void {
-  const result = spawnSync(command, args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
-  if (result.error) throw new Error(`${command}: ${result.error.message}`)
-  if (result.status !== 0)
+async function run(command: string, args: string[]): Promise<void> {
+  const result = await $`${command} ${args}`.noThrow().quiet()
+  if (result.code !== 0)
     throw new Error(
-      `${command} ${args.join(' ')} failed: ${(result.stderr || result.stdout).trim() || `exit ${result.status}`}`,
+      `${command} ${args.join(' ')} failed: ${(result.stderr || result.stdout).trim() || `exit ${result.code}`}`,
     )
   if (result.stdout.trim()) process.stdout.write(result.stdout)
 }
@@ -467,14 +466,15 @@ async function execute(plan: Plan): Promise<void> {
       `Claude session ${plan.id} is active; close it before deleting`,
     )
   if (plan.components.has('agent'))
-    for (const agent of plan.agents) run(paseoCommand, ['delete', agent.id])
+    for (const agent of plan.agents)
+      await run(paseoCommand, ['delete', agent.id])
   if (plan.components.has('session')) {
     if (plan.provider === 'claude') {
       if (plan.self) await stopClaudePids(plan.id)
       deleteClaude(plan)
     } else {
       try {
-        run(codexCommand, ['delete', '--force', plan.id])
+        await run(codexCommand, ['delete', '--force', plan.id])
       } catch (error) {
         if (!/not found|does not exist|unknown session/i.test(String(error)))
           throw error
@@ -485,7 +485,7 @@ async function execute(plan: Plan): Promise<void> {
     }
   }
   if (plan.workspace)
-    run(paseoCommand, ['workspace', 'archive', plan.workspace.id])
+    await run(paseoCommand, ['workspace', 'archive', plan.workspace.id])
 }
 
 async function appendedEvents(
@@ -615,40 +615,17 @@ function schedule(plan: Plan): void {
   )
 }
 
-const { values, positionals } = parseArgs({
-  allowPositionals: true,
-  options: {
-    provider: { type: 'string' },
-    'dry-run': { type: 'boolean' },
-    'archive-workspace': { type: 'boolean' },
-    components: { type: 'string' },
-    help: { type: 'boolean', short: 'h' },
-  },
-})
-if (values.help) {
-  process.stdout.write(
-    'Usage: bun delete-session.ts [<session-uuid>] [--provider claude|codex] [--dry-run] [--components session,agent,workspace | --archive-workspace]\n',
-  )
-  process.exit(0)
-}
-if (positionals.length > 1) fail('pass at most one session UUID')
-if (
-  values.provider &&
-  values.provider !== 'claude' &&
-  values.provider !== 'codex'
-)
-  fail('--provider must be claude or codex')
-if (values.components !== undefined && values['archive-workspace'])
-  fail('pass --components or --archive-workspace, not both')
-
-function selectedComponents(): ReadonlySet<Component> {
-  if (values.components === undefined)
+function selectedComponents(
+  namesArg: string | undefined,
+  archiveWorkspace: boolean,
+): ReadonlySet<Component> {
+  if (namesArg === undefined)
     return new Set<Component>(
-      values['archive-workspace']
+      archiveWorkspace
         ? ['session', 'agent', 'workspace']
         : ['session', 'agent'],
     )
-  const names = values.components.split(',')
+  const names = namesArg.split(',')
   if (
     names.some((name) => !['session', 'agent', 'workspace'].includes(name)) ||
     new Set(names).size !== names.length
@@ -659,26 +636,71 @@ function selectedComponents(): ReadonlySet<Component> {
   return new Set(names as Component[])
 }
 
-try {
-  const target = resolveTarget(
-    positionals[0],
-    values.provider as Provider | undefined,
-  )
-  const plan = makePlan(target, selectedComponents())
-  report(plan, values['dry-run'] ?? false)
-  if (values['dry-run']) process.exit(0)
-  const deferredOffset = process.env.DELETE_SESSION_DEFERRED
-  if (deferredOffset !== undefined) {
-    const log = process.env.DELETE_SESSION_DEFERRED_LOG
+const main = defineCommand({
+  meta: {
+    name: 'delete-session',
+    description:
+      'Delete selected Claude Code, Codex, and Paseo session components.',
+  },
+  args: {
+    session: {
+      type: 'positional',
+      required: false,
+      description: 'Session UUID',
+    },
+    provider: {
+      type: 'enum',
+      options: ['claude', 'codex'],
+      description: 'Session provider',
+    },
+    components: {
+      type: 'string',
+      description: 'Comma-separated subset of session,agent,workspace',
+    },
+    'archive-workspace': {
+      type: 'boolean',
+      default: false,
+      description: 'Delete session and agent, then archive linked workspace',
+    },
+    'dry-run': {
+      type: 'boolean',
+      default: false,
+      description: 'Show selected operations without deleting',
+    },
+  },
+  async run({ args }) {
+    if (args._.length > 1) fail('pass at most one session UUID')
+    if (args.components !== undefined && args['archive-workspace'])
+      fail('pass --components or --archive-workspace, not both')
+
     try {
-      await deferred(plan, Number(deferredOffset))
-      if (log) await Bun.write(log, 'delete-session: completed\n')
+      const target = resolveTarget(
+        args.session,
+        args.provider as Provider | undefined,
+      )
+      const plan = makePlan(
+        target,
+        selectedComponents(args.components, args['archive-workspace']),
+      )
+      report(plan, args['dry-run'])
+      if (args['dry-run']) return
+
+      const deferredOffset = process.env.DELETE_SESSION_DEFERRED
+      if (deferredOffset !== undefined) {
+        const log = process.env.DELETE_SESSION_DEFERRED_LOG
+        try {
+          await deferred(plan, Number(deferredOffset))
+          if (log) await Bun.write(log, 'delete-session: completed\n')
+        } catch (error) {
+          if (log) await Bun.write(log, `delete-session: ${String(error)}\n`)
+          throw error
+        }
+      } else if (plan.self) schedule(plan)
+      else await execute(plan)
     } catch (error) {
-      if (log) await Bun.write(log, `delete-session: ${String(error)}\n`)
-      throw error
+      fail(error instanceof Error ? error.message : String(error))
     }
-  } else if (plan.self) schedule(plan)
-  else await execute(plan)
-} catch (error) {
-  fail(error instanceof Error ? error.message : String(error))
-}
+  },
+})
+
+await runMain(main)
