@@ -47,7 +47,7 @@ per-file `git diff` are deterministic and repeatable, so they belong in `scripts
   delegate. Don't write it here. Hand off a short spec (purpose, run command,
   input, exact output, edge cases, done-when) plus an init-prompt, and let a fresh
   session build it in the normal dev flow.
-- Anti-slop is already shared at `~/.claude/skills/create-skill/scripts/slop-lint.ts`.
+- Anti-slop is already shared at `~/.agents/skills/create-skill/scripts/slop-lint.ts`.
   Point new skills at that path; don't copy the linter into each one.
 
 ## 4. Density
@@ -55,7 +55,7 @@ per-file `git diff` are deterministic and repeatable, so they belong in `scripts
 Run the linter on the draft:
 
 ```
-bun ~/.claude/skills/create-skill/scripts/slop-lint.ts SKILL.md
+bun <skill-dir>/scripts/slop-lint.ts SKILL.md
 ```
 
 Fix every tell. Rewrite the line from source instead of paraphrasing, because a

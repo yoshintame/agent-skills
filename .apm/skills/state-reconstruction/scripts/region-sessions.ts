@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 const HOME = homedir()
 const DB = join(HOME, ".claude", "cc.duckdb")
-const CC_SQL = join(HOME, ".claude", "skills", "find-session", "assets", "cc.sql")
+const CC_SQL = join(HOME, ".agents", "skills", "find-session", "assets", "cc.sql")
 const PROJECTS = join(HOME, ".claude", "projects")
 const HANDOFFS = join(HOME, ".claude", "handoffs")
 const BATCH_BYTES = 128 * 1024 * 1024
@@ -41,7 +41,7 @@ if (substrings.length === 0) usage()
 if (!existsSync(DB)) {
   process.stderr.write(
     `region-sessions: snapshot not found at ${DB}\n` +
-      "Build it first: bun ~/.claude/skills/find-session/scripts/search.ts --bm25 --rebuild --sessions \"<anything>\"\n",
+      "Build it first: bun ~/.agents/skills/find-session/scripts/search.ts --bm25 --rebuild --sessions \"<anything>\"\n",
   )
   process.exit(1)
 }

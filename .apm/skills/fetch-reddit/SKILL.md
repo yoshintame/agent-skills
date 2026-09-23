@@ -13,11 +13,7 @@ Fetch Reddit posts and comments via an anonymous Reddit Android-app OAuth token
 Run the bundled script with the Reddit URL:
 
 ```bash
-if [ -x "$HOME/.agents/skills/fetch-reddit/scripts/fetch-reddit.py" ]; then
-  python3 "$HOME/.agents/skills/fetch-reddit/scripts/fetch-reddit.py" "<reddit-url>"
-else
-  python3 "$HOME/.claude/skills/fetch-reddit/scripts/fetch-reddit.py" "<reddit-url>"
-fi
+python3 "<skill-dir>/scripts/fetch-reddit.py" "<reddit-url>"
 ```
 
 Present the output in a readable format.

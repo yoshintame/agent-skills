@@ -16,7 +16,7 @@ description: Reconstruct a stale or paused AI session. Read-only.
 Скрипт собирает сырую фактуру (файлы, коммиты, staleness) — используй как вход для нарратива, не копируй секциями.
 
 ```
-bun ~/.claude/skills/session-status/scripts/session-status.ts [session-id]
+bun <skill-dir>/scripts/session-status.ts [session-id]
 ```
 
 Без аргумента — берёт `CLAUDE_CODE_SESSION_ID` из env (текущая сессия); если env нет — latest по mtime в cwd. Полный UUID — конкретная. Шапка несёт `Reconstructed as-of`, `Idle` (сколько прошло с последнего сообщения) и `HEAD at snapshot` — перенеси в итог. `moved → <новый путь>` — уцелевший переезд, не потеря.

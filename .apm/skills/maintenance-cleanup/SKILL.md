@@ -13,7 +13,7 @@ Free disk space on this Mac (`lasthaze-mbp`, fish + gtrash). Two defaults are wr
 ## Scan
 
 ```
-bun ~/.claude/skills/maintenance-cleanup/scripts/scan.ts
+bun <skill-dir>/scripts/scan.ts
 ```
 
 Prints real free space plus the size of each known hotspot, tagged `SAFE` (caches, trash — delete freely) or `ASK` (VM disks, games, media — confirm first).

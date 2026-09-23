@@ -10,7 +10,7 @@ description: Поиск по истории сессий Claude Code (мои р�
 ## Первый ход — BM25 ранжированный шортлист
 
 ```bash
-bun ~/.claude/skills/find-session/scripts/search.ts --bm25 --sessions "<слова юзера как есть, RU+EN>"
+bun <skill-dir>/scripts/search.ts --bm25 --sessions "<слова юзера как есть, RU+EN>"
 ```
 
 Передавай слова юзера дословно плюс очевидные RU/EN-синонимы. BM25 **дизъюнктивен**: отсутствующий терм стоит 0, совпавшие суммируются. Неверное слово юзера сессию не исключает — в отличие от ILIKE-AND, где каждое слово обязательно и один неверный терм выкидывает ответ. И он ранжирует по релевантности, тогда как `--sessions` ILIKE-пути сортирует по дате, где попадание неотличимо от шума.
@@ -37,7 +37,7 @@ BM25 — **шорт-листер, не арбитр**. Гибридный вор
 Юзер не пользуется CLI-клиентом — `claude --resume <id>` для него мёртвая строка. И ссылку в ответе давать бесполезно: markdown-линк на `vscode://` из чата не кликается (вебвью не отдаёт нестандартную схему в ОС), клик просто ничего не делает. Открывай сам:
 
 ```bash
-bun ~/.claude/skills/find-session/scripts/open-session.ts <session-id> [--prompt "<текст>"] [--dry-run]
+bun <skill-dir>/scripts/open-session.ts <session-id> [--prompt "<текст>"] [--dry-run]
 ```
 
 Запускать с выключенным сэндбоксом (`dangerouslyDisableSandbox: true`): скрипт читает `~/.claude/ide/*.lock`, а этот путь во встроенном read-deny сэндбокса. `--dry-run` печатает cwd и план, ничего не запуская, — годится, когда просто нужно показать, где сессия живёт.
@@ -69,7 +69,7 @@ bun ~/.claude/skills/find-session/scripts/open-session.ts <session-id> [--prompt
 Когда нужен точный язык, опечатка или узкий матч мимо стеммера индекса:
 
 ```bash
-bun ~/.claude/skills/find-session/scripts/search.ts "<синоним>" ["<синоним>" …] [флаги]
+bun <skill-dir>/scripts/search.ts "<синоним>" ["<синоним>" …] [флаги]
 ```
 
 Агент даёт синонимы, скрипт стеммит их Snowball'ом (`stem()`) и объединяет по OR. RU+EN. Частые опечатки — отдельными синонимами: `stem()` чинит окончания, не корень (`промт`≠`промпт`). **Каждый синоним — упорядоченная склейка `%a%b%` своих слов, и она конъюнктивна** — все слова синонима обязательны (та самая ILIKE-AND-ловушка; держи синонимы короткими).
@@ -81,7 +81,7 @@ bun ~/.claude/skills/find-session/scripts/search.ts "<синоним>" ["<син
 Пересечения, агрегаты, regex-якоря по шортлисту. OOM-прагмы в `cc.sql` — не вырезай:
 
 ```bash
-duckdb -init ~/.claude/skills/find-session/assets/cc.sql -c "<SQL>"
+duckdb -init <skill-dir>/assets/cc.sql -c "<SQL>"
 ```
 
 - `me(project, session_id, ts, text)` — мои реплики (инъекции вычищены).

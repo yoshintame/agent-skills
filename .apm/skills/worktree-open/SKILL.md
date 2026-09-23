@@ -8,7 +8,7 @@ description: Link the current worktree session into main and open it in VSCode.
 Run from a session whose cwd is a git worktree. One command does both steps:
 
 ```
-bun ~/.claude/skills/worktree-open/scripts/link-and-open.ts
+bun <skill-dir>/scripts/link-and-open.ts
 ```
 
 It hardlinks the current session (`$CLAUDE_CODE_SESSION_ID`, found anywhere via

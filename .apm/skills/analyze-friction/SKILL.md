@@ -6,8 +6,8 @@ description: Мера фрикшена агента по истории тран
 # /analyze-friction
 
 ```bash
-bun ~/.claude/skills/analyze-friction/scripts/miner.ts               # полный скан (корпус ~4GB, чанки <=128MB)
-bun ~/.claude/skills/analyze-friction/scripts/miner.ts --rollup-only # переиспользовать последний скан, итерировать роллапы
+bun <skill-dir>/scripts/miner.ts               # полный скан (корпус ~4GB, чанки <=128MB)
+bun <skill-dir>/scripts/miner.ts --rollup-only # переиспользовать последний скан, итерировать роллапы
 ```
 
 Вывод — ранжированные кандидат-диффы конфига, не сырой лог. Единый CTAS по корпусу OOM'ится, поэтому скан чанкуется пофайлово; `--rollup-only` переиспользует `$TMPDIR/friction.duckdb`.
