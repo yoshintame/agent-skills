@@ -16,7 +16,7 @@ watch.
 2. Fetch the transcript and metadata:
 
    ```bash
-   "$HOME/.claude/skills/youtube-summary/scripts/yt-transcript" "<url>" --json
+   "<skill-dir>/scripts/yt-transcript" "<url>" --json
    ```
 
    The script prints a JSON object: `title`, `channel`, `url`, `thumbnail`,

@@ -7,11 +7,7 @@ argument-hint: <search query | publisher.ext [publisher.ext ...]>
 Run:
 
 ```bash
-if [ -x "$HOME/.agents/skills/vscode-marketplace/vscode-marketplace.py" ]; then
-  python3 "$HOME/.agents/skills/vscode-marketplace/vscode-marketplace.py" $ARGUMENTS
-else
-  python3 "$HOME/.claude/skills/vscode-marketplace/vscode-marketplace.py" $ARGUMENTS
-fi
+python3 "<skill-dir>/vscode-marketplace.py" $ARGUMENTS
 ```
 
 Present the output as a markdown table.

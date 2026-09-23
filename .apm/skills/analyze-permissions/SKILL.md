@@ -12,7 +12,7 @@ Analyze the permission request log and optimize the allow list in `settings.json
 Run the bundled analysis script:
 
 ```bash
-python3 ~/.claude/skills/analyze-permissions/scripts/analyze-permissions.py
+python3 <skill-dir>/scripts/analyze-permissions.py
 ```
 
 Present the output to the user. Highlight the most impactful findings:
@@ -25,7 +25,7 @@ Present the output to the user. Highlight the most impactful findings:
 If the user passes `--apply` (or says "apply", "fix", "clean up"):
 
 ```bash
-python3 ~/.claude/skills/analyze-permissions/scripts/analyze-permissions.py --apply
+python3 <skill-dir>/scripts/analyze-permissions.py --apply
 ```
 
 After the script runs, show a summary of what changed (removed, added, log marked as processed).

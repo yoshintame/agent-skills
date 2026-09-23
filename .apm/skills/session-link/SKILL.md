@@ -4,7 +4,7 @@ description: Make a Claude Code session resumable from another directory.
 ---
 
 ```
-bun ~/.claude/skills/session-link/scripts/link-session-to.ts <dst-cwd> [src-cwd] [--session <id>]
+bun <skill-dir>/scripts/link-session-to.ts <dst-cwd> [src-cwd] [--session <id>]
 ```
 
 `src-cwd` defaults to cwd, `--session` to `$CLAUDE_CODE_SESSION_ID` (falling back to the

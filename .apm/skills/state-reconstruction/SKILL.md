@@ -15,7 +15,7 @@ description: Незафиксированная работа региона: с�
 ## 1. Обратный индекс сессий
 
 ```bash
-bun ~/.claude/skills/state-reconstruction/scripts/region-sessions.ts <substr> [substr…] [--limit=N]
+bun <skill-dir>/scripts/region-sessions.ts <substr> [substr…] [--limit=N]
 ```
 
 Скрипт сам покрывает и старую историю, и свежие сессии; подготовка не нужна, запускай как есть. Секции вывода:
@@ -47,7 +47,7 @@ git -C <repo> stash list
 Прогони по ним скрипт session-status:
 
 ```bash
-bun ~/.claude/skills/session-status/scripts/session-status.ts <uuid> [uuid…]
+bun ~/.agents/skills/session-status/scripts/session-status.ts <uuid> [uuid…]
 ```
 
 UUID полные, отчёты в выводе разделяются `---`. Все сессии подряд не бери: каждый прогон сканирует весь корпус и стоит дорого.
@@ -115,7 +115,7 @@ duckdb ~/.claude/cc.duckdb -readonly -c "SELECT … FROM msg_cache WHERE …"
 По конкретным сессиям, с настоящими `kind`/`tool`:
 
 ```bash
-duckdb -init ~/.claude/skills/find-session/assets/cc.sql -c "
+duckdb -init ~/.agents/skills/find-session/assets/cc.sql -c "
 ATTACH '$HOME/.claude/cc.duckdb' AS cc (READ_ONLY);
 SELECT … FROM msg_src(['<файл>.jsonl', …]) WHERE kind='tool_use' AND …"
 ```

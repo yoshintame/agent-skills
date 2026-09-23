@@ -23,7 +23,7 @@ description: Give a clickable link that opens a GitLens "Search & Compare" view 
 ## Запуск
 
 ```bash
-bash ~/.claude/skills/git-ref/scripts/compare-link.sh -C <repo> <ref1> <ref2>
+bash <skill-dir>/scripts/compare-link.sh -C <repo> <ref1> <ref2>
 ```
 
 `-C <repo>` передавай всегда — cwd между вызовами Bash дрейфует, а молча собранная ссылка по чужому репо выглядит валидной.
