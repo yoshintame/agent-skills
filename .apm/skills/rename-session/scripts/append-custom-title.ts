@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process'
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, writeSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 
 export enum SessionType {
@@ -41,6 +41,7 @@ enum SessionStatus {
 
 interface ParsedArgs {
   feature?: string
+  leaves: string[]
   status: SessionStatus
   title: string
 }
@@ -65,16 +66,20 @@ const TITLE_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+){1,4}$/
 const FEATURE_REGEX = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const COMPOSITE_REGEX = /^(🔴|🟡|🟢) [a-z0-9-]+\/[a-z0-9-]+$/u
 const MAX_VISIBLE_LEN = 80
+const UNCOMMITTED_GATE = resolve(import.meta.dir, '..', '..', 'session-status', 'scripts', 'session-status.ts')
+const GATE_BLOCKING_EXIT = 2
 
 if (import.meta.main) await main()
 
 async function main(): Promise<void> {
-  const { feature, status, title } = parseArgs(process.argv.slice(2))
+  const { feature, leaves, status, title } = parseArgs(process.argv.slice(2))
   validateTitle(title)
   if (feature !== undefined) validateFeature(feature)
+  if (leaves.length > 0 && status !== SessionStatus.Done) die('--leave only applies with --status done')
   const customTitle = `${STATUS_EMOJI[status]} ${title}`
   validateCompositeName(customTitle)
   const provider = resolveProviderSession(process.env)
+  if (status === SessionStatus.Done) runUncommittedGate(provider, leaves)
 
   let previousTitle: string | undefined
 
@@ -89,11 +94,37 @@ async function main(): Promise<void> {
   updatePaseo(provider.id, customTitle, feature)
   const oldDisplay = previousTitle ?? '(unnamed)'
   process.stdout.write(`${oldDisplay} → ${customTitle}\n`)
+  for (const leave of leaves) process.stdout.write(`left uncommitted: ${leave}\n`)
+}
+
+function runUncommittedGate(provider: ProviderSession, leaves: readonly string[]): void {
+  if (provider.kind === 'codex') {
+    process.stderr.write('rename-session: uncommitted gate reads Claude transcripts only; skipped for Codex\n')
+    return
+  }
+  if (!existsSync(UNCOMMITTED_GATE)) die(`uncommitted gate not found at ${UNCOMMITTED_GATE}`)
+  const gate = Bun.spawnSync(
+    [process.execPath, UNCOMMITTED_GATE, '--uncommitted', ...leaves.flatMap((leave) => ['--leave', leave]), provider.id],
+    { stdout: 'pipe', stderr: 'pipe' },
+  )
+  const stdout = gate.stdout.toString()
+  const stderr = gate.stderr.toString()
+  if (gate.exitCode === 0) {
+    process.stderr.write(stderr)
+    return
+  }
+  process.stderr.write(stdout)
+  process.stderr.write(stderr)
+  if (gate.exitCode === GATE_BLOCKING_EXIT) {
+    die('refusing done: the session left uncommitted changes above — commit or discard each, or pass --leave <abs-path>=<reason>')
+  }
+  die(`uncommitted gate failed with exit ${gate.exitCode}`)
 }
 
 function parseArgs(argv: readonly string[]): ParsedArgs {
   let status = SessionStatus.Active
   let feature: string | undefined
+  const leaves: string[] = []
   const positional: string[] = []
 
   for (let index = 0; index < argv.length; index++) {
@@ -103,13 +134,17 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
       status = parseStatus(argv[++index])
     } else if (arg.startsWith('--status=')) {
       status = parseStatus(arg.slice('--status='.length))
+    } else if (arg === '--leave') {
+      leaves.push(parseLeave(argv[++index]))
+    } else if (arg.startsWith('--leave=')) {
+      leaves.push(parseLeave(arg.slice('--leave='.length)))
     } else if (arg === '--feature') {
       feature = parseFeature(argv[++index])
     } else if (arg.startsWith('--feature=')) {
       feature = parseFeature(arg.slice('--feature='.length))
     } else if (arg === '--help' || arg === '-h') {
       process.stdout.write(
-        'usage: append-custom-title.ts [--status active|paused|done] [--feature kebab-feature] <type/kebab-title>\n',
+        'usage: append-custom-title.ts [--status active|paused|done] [--feature kebab-feature] [--leave <abs-path>=<reason>]... <type/kebab-title>\n',
       )
       process.exit(0)
     } else if (arg.startsWith('-')) {
@@ -126,7 +161,7 @@ function parseArgs(argv: readonly string[]): ParsedArgs {
 
   const title = positional[0]
   if (title === undefined) die('missing positional title: <type>/<kebab-title>')
-  return { feature, status, title }
+  return { feature, leaves, status, title }
 }
 
 function parseStatus(value: unknown): SessionStatus {
@@ -134,6 +169,11 @@ function parseStatus(value: unknown): SessionStatus {
   if (value === SessionStatus.Paused) return value
   if (value === SessionStatus.Done) return value
   die(`--status must be active|paused|done, got ${JSON.stringify(value)}`)
+}
+
+function parseLeave(value: unknown): string {
+  if (typeof value === 'string' && /^[^=]+=\s*\S/.test(value)) return value
+  die(`--leave expects <abs-path>=<reason>, got ${JSON.stringify(value)}`)
 }
 
 function parseFeature(value: unknown): string {

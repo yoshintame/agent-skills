@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-import { existsSync, readdirSync, statSync } from "node:fs"
+import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs"
 import { homedir } from "node:os"
-import { basename, dirname, extname, join, relative } from "node:path"
+import { basename, dirname, extname, isAbsolute, join, relative } from "node:path"
 import $ from "dax-sh@0.42.0"
 
 $.setPrintCommand(false)
@@ -9,6 +9,11 @@ $.setPrintCommand(false)
 const PROJECTS = join(homedir(), ".claude", "projects")
 const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"])
 const WINDOW_BUFFER_MS = 60 * 60 * 1000
+const CALL_SLACK_MS = 2000
+const BASH_TIMEOUT_MS = Number(process.env.BASH_DEFAULT_TIMEOUT_MS) || 2 * 60 * 1000
+const BASH_MAX_TIMEOUT_MS = Number(process.env.BASH_MAX_TIMEOUT_MS) || 10 * 60 * 1000
+const INFO_LIMIT = 20
+const EXIT_BLOCKING = 2
 
 const DOC_EXT = new Set([".md", ".txt", ".rst"])
 const CODE_EXT = new Set([
@@ -19,9 +24,11 @@ const NOISE = ["/node_modules/", "/.next/", "/dist/", "/build/", "/.git/", "/cov
 
 type FileClass = "doc" | "code" | "config" | "other"
 type ToolEdit = { filePath: string; timestamp: string; tool: string }
+type BashCall = { command: string; cwds: string[]; startMs: number; endMs: number }
 type Parsed = {
   sessionId: string | null
   edits: ToolEdit[]
+  bash: BashCall[]
   startMs: number | null
   endMs: number | null
 }
@@ -62,33 +69,80 @@ function* toolEdits(rec: any): Generator<ToolEdit> {
   for (const item of content) {
     if (!(item && typeof item === "object" && item.type === "tool_use")) continue
     if (!EDIT_TOOLS.has(item.name)) continue
-    const filePath = item.input?.file_path
+    const filePath = item.input?.file_path ?? item.input?.notebook_path
     if (filePath) yield { filePath, timestamp: rec.timestamp ?? "", tool: item.name }
   }
 }
 
-async function parseSession(path: string): Promise<Parsed> {
+async function transcriptPaths(jsonl: string): Promise<string[]> {
+  const paths = [jsonl]
+  const subDir = join(dirname(jsonl), basename(jsonl, ".jsonl"), "subagents")
+  if (!existsSync(subDir)) return paths
+  for await (const p of new Bun.Glob("**/*.jsonl").scan({ cwd: subDir, absolute: true })) paths.push(p)
+  return paths
+}
+
+async function parseSession(paths: string[]): Promise<Parsed> {
   const edits: ToolEdit[] = []
+  const bash: BashCall[] = []
+  const pending = new Map<string, { command: string; cwds: string[]; startMs: number; timeoutMs: number; background: boolean }>()
+  const backgrounded = new Map<string, { command: string; cwds: string[]; startMs: number }>()
   let sessionId: string | null = null
   let startMs: number | null = null
   let endMs: number | null = null
-  const text = await Bun.file(path).text()
-  for (const line of text.split("\n")) {
-    let rec: any
-    try {
-      rec = JSON.parse(line)
-    } catch {
-      continue
+  for (const path of paths) {
+    const text = await Bun.file(path).text()
+    for (const line of text.split("\n")) {
+      let rec: any
+      try {
+        rec = JSON.parse(line)
+      } catch {
+        continue
+      }
+      if (!sessionId) sessionId = rec.sessionId ?? null
+      const ms = isoToUnix(rec.timestamp ?? "")
+      if (ms !== null) {
+        if (startMs === null || ms < startMs) startMs = ms
+        if (endMs === null || ms > endMs) endMs = ms
+      }
+      for (const e of toolEdits(rec)) edits.push(e)
+      const content = rec?.message?.content
+      if (ms === null) continue
+      if (rec.type === "user") {
+        const text = typeof content === "string" ? content : Array.isArray(content) ? content.map((c: any) => c?.text ?? "").join("") : ""
+        for (const m of text.matchAll(/<task-notification>[\s\S]*?<tool-use-id>([^<]+)<\/tool-use-id>/g)) {
+          const call = backgrounded.get(m[1])
+          if (!call) continue
+          backgrounded.delete(m[1])
+          bash.push({ ...call, endMs: ms })
+        }
+      }
+      if (!Array.isArray(content)) continue
+      for (const item of content) {
+        if (rec.type === "assistant" && item?.type === "tool_use" && item.name === "Bash" && typeof item.input?.command === "string") {
+          pending.set(item.id, {
+            command: item.input.command,
+            cwds: rec.cwd ? [rec.cwd] : [],
+            startMs: ms,
+            timeoutMs: Math.min(Number(item.input.timeout) || BASH_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS),
+            background: item.input.run_in_background === true,
+          })
+        } else if (rec.type === "user" && item?.type === "tool_result") {
+          const call = pending.get(item.tool_use_id)
+          if (!call) continue
+          pending.delete(item.tool_use_id)
+          if (rec.cwd) call.cwds.push(rec.cwd)
+          const done = { command: call.command, cwds: call.cwds, startMs: call.startMs }
+          if (call.background) backgrounded.set(item.tool_use_id, done)
+          else bash.push({ ...done, startMs: Math.max(call.startMs, ms - call.timeoutMs), endMs: ms })
+        }
+      }
     }
-    if (!sessionId) sessionId = rec.sessionId ?? null
-    const ms = isoToUnix(rec.timestamp ?? "")
-    if (ms !== null) {
-      if (startMs === null || ms < startMs) startMs = ms
-      if (endMs === null || ms > endMs) endMs = ms
-    }
-    for (const e of toolEdits(rec)) edits.push(e)
   }
-  return { sessionId, edits, startMs, endMs }
+  for (const call of [...pending.values(), ...backgrounded.values()]) {
+    bash.push({ command: call.command, cwds: call.cwds, startMs: call.startMs, endMs: endMs ?? call.startMs })
+  }
+  return { sessionId, edits, bash, startMs, endMs }
 }
 
 async function findLaterTouches(
@@ -160,8 +214,16 @@ async function gitToplevel(fileDir: string): Promise<string | null> {
   const dir = nearestExistingDir(fileDir)
   const cached = toplevelCache.get(dir)
   if (cached !== undefined) return cached
-  const res = await $`git -C ${dir} rev-parse --show-toplevel`.noThrow().stdout("piped").stderr("null")
-  const top = res.code === 0 ? res.stdout.trim() : null
+  let top: string | null = null
+  try {
+    for (let d = realpathSync(dir); ; d = dirname(d)) {
+      if (existsSync(join(d, ".git"))) {
+        top = d
+        break
+      }
+      if (dirname(d) === d) break
+    }
+  } catch {}
   toplevelCache.set(dir, top)
   return top
 }
@@ -349,7 +411,7 @@ async function report(sessionIdArg: string | null): Promise<string | null> {
     return null
   }
 
-  const parsed = await parseSession(jsonl)
+  const parsed = await parseSession(await transcriptPaths(jsonl))
 
   const editMs = parsed.edits.map((e) => isoToUnix(e.timestamp)).filter((m): m is number => m !== null)
   const startMs = editMs.length > 0 ? Math.min(...editMs) : (parsed.startMs ?? 0)
@@ -481,8 +543,329 @@ async function report(sessionIdArg: string | null): Promise<string | null> {
   return out
 }
 
+function expandHome(p: string): string {
+  return p === "~" || p.startsWith("~/") ? join(HOMEDIR, p.slice(1)) : p
+}
+
+function canonicalPath(p: string): string {
+  const abs = expandHome(p)
+  const base = nearestExistingDir(abs)
+  try {
+    const real = realpathSync(base)
+    return base === abs ? real : join(real, relative(base, abs))
+  } catch {
+    return abs
+  }
+}
+
+async function repoFor(path: string): Promise<string | null> {
+  const existing = nearestExistingDir(expandHome(path))
+  try {
+    return await gitToplevel(statSync(existing).isDirectory() ? existing : dirname(existing))
+  } catch {
+    return null
+  }
+}
+
+const PATH_TOKEN = /(?:^|[\s'"=:(`])(~(?:\/[^\s'"`;|&()<>]*)?|\/[^\s'"`;|&()<>]+)/g
+function commandPaths(command: string): string[] {
+  return [...command.matchAll(PATH_TOKEN)].map((m) => expandHome(m[1].replace(/[,.:]+$/, "")))
+}
+
+const READ_ONLY = new Set([
+  "cat", "head", "tail", "less", "ls", "find", "fd", "rg", "grep", "egrep", "fgrep", "wc", "stat", "file", "jq", "yq",
+  "echo", "printf", "pwd", "which", "type", "date", "sort", "uniq", "cut", "tr", "column", "diff", "cmp", "comm",
+  "basename", "dirname", "realpath", "readlink", "du", "df", "true", "false", "test", "[", "sleep", "sed", "awk", "tree",
+  "bat", "md5", "shasum", "xxd", "od", "hexdump", "ps", "pgrep", "lsof", "uname", "whoami", "id", "hostname", "mdls",
+  "plutil", "nl", "paste", "tac", "seq", "cd", "export", "read", "local",
+])
+const GIT_READ_ONLY = new Set([
+  "status", "log", "show", "diff", "rev-parse", "ls-files", "ls-tree", "blame", "grep", "cat-file", "describe", "reflog",
+  "shortlog", "branch", "remote", "config", "worktree", "tag", "for-each-ref", "merge-base", "rev-list", "check-ignore",
+])
+const SHELL_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "{", "}", "done", "fi"])
+const WRAPPERS = new Set(["time", "nice", "command", "builtin", "xargs", "timeout"])
+const REDIRECT = /(?:^|[^<>=-])\d*>>?(?!&)(?!\s*\/dev\/null\b)\s*[^\s&|;]/
+
+function isReadOnly(command: string): boolean {
+  if (/<<-?\s*['"]?\w/.test(command)) return false
+  const bare = command.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, "Q").replace(/\\./g, "E")
+  if (REDIRECT.test(bare)) return false
+  for (const seg of bare.split(/&&|\|\||[;|\n()`]|\$\(/)) {
+    const words = seg.trim().split(/\s+/).filter(Boolean)
+    while (words.length > 0 && (/^\w+=/.test(words[0]) || SHELL_WORDS.has(words[0]))) words.shift()
+    while (words.length > 0 && WRAPPERS.has(words[0])) {
+      words.shift()
+      while (words.length > 0 && (words[0].startsWith("-") || /^\d+$/.test(words[0]))) words.shift()
+    }
+    if (words.length === 0 || words[0] === "for") continue
+    const program = basename(words[0])
+    if (program === "git") {
+      let i = 1
+      while (words[i] === "-C" || words[i] === "-c" || words[i]?.startsWith("--no-")) i += words[i] === "-C" || words[i] === "-c" ? 2 : 1
+      const sub = words[i]
+      if (sub === "stash" ? !["list", "show"].includes(words[i + 1] ?? "") : !GIT_READ_ONLY.has(sub ?? "")) return false
+      continue
+    }
+    if (!READ_ONLY.has(program)) return false
+    if (program === "sed" && words.some((w) => /^-[a-zA-Z]*i/.test(w) || w.startsWith("--in-place"))) return false
+    if (program === "find" && words.some((w) => /^-(delete|exec|execdir|ok|fprint)/.test(w))) return false
+  }
+  return true
+}
+
+async function gitDirty(repo: string): Promise<Array<{ xy: string; rel: string }>> {
+  const res = await $`git --no-optional-locks -C ${repo} status --porcelain=v1 -z --untracked-files=normal`
+    .noThrow()
+    .stdout("piped")
+    .stderr("null")
+  if (res.code !== 0) return []
+  const parts = res.stdout.split("\0")
+  const out: Array<{ xy: string; rel: string }> = []
+  for (let i = 0; i < parts.length; i++) {
+    const entry = parts[i]
+    if (entry.length < 4) continue
+    const xy = entry.slice(0, 2)
+    out.push({ xy, rel: entry.slice(3) })
+    if (xy[0] === "R" || xy[0] === "C") i++
+  }
+  return out
+}
+
+async function gitStashes(repo: string): Promise<Array<{ ref: string; hash: string; ms: number; subject: string }>> {
+  const res = await $`git --no-optional-locks -C ${repo} stash list --format=%gd%x09%H%x09%ct%x09%gs`
+    .noThrow()
+    .stdout("piped")
+    .stderr("null")
+  if (res.code !== 0) return []
+  const out: Array<{ ref: string; hash: string; ms: number; subject: string }> = []
+  for (const l of res.stdout.split("\n")) {
+    const [ref, hash, ct, subject] = l.split("\t")
+    if (ref && hash && ct) out.push({ ref, hash, ms: Number(ct) * 1000, subject: subject ?? "" })
+  }
+  return out
+}
+
+function changeMs(abs: string, isDir: boolean): number | null {
+  if (isDir) {
+    let max: number | null = null
+    let budget = 2000
+    const walk = (dir: string): void => {
+      for (const name of readdirCached(dir)) {
+        if (--budget < 0) return
+        const p = join(dir, name)
+        try {
+          const st = lstatSync(p)
+          if (max === null || st.mtimeMs > max) max = st.mtimeMs
+          if (st.isDirectory()) walk(p)
+        } catch {}
+      }
+    }
+    walk(abs)
+    return max
+  }
+  try {
+    return lstatSync(abs).mtimeMs
+  } catch {}
+  try {
+    return statSync(nearestExistingDir(dirname(abs))).mtimeMs
+  } catch {
+    return null
+  }
+}
+
+function namesPath(command: string, rel: string): boolean {
+  const segs = rel.split("/").filter(Boolean)
+  const base = segs.at(-1) ?? rel
+  return [...segs, base.replace(/\.[^.]+$/, "")].some((w) =>
+    new RegExp(`(^|[^\\w.-])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\w-]|$)`).test(command),
+  )
+}
+
+function oneLine(command: string): string {
+  const flat = command.replace(/\s+/g, " ").trim()
+  return flat.length > 70 ? `${flat.slice(0, 69)}…` : flat
+}
+
+function parseLeave(leaves: Map<string, string>, raw: string | undefined): void {
+  const eq = raw?.indexOf("=") ?? -1
+  const key = eq > 0 ? raw!.slice(0, eq).trim() : ""
+  const reason = eq > 0 ? raw!.slice(eq + 1).trim() : ""
+  if (!key || !reason) {
+    process.stderr.write(`--leave expects <abs-path>=<reason> or stash:<hash>=<reason>, got ${JSON.stringify(raw)}\n`)
+    process.exit(1)
+  }
+  if (key.startsWith("stash:")) {
+    leaves.set(key, reason)
+    return
+  }
+  const expanded = expandHome(key)
+  if (!isAbsolute(expanded)) {
+    process.stderr.write(`--leave path must be absolute, got ${JSON.stringify(key)}\n`)
+    process.exit(1)
+  }
+  leaves.set(canonicalPath(expanded).replace(/\/$/, ""), reason)
+}
+
+type Pending = { repo: string; label: string; key: string; why: string }
+
+async function uncommitted(sessionIdArg: string | null, leaves: Map<string, string>): Promise<number> {
+  const jsonl = await findSessionJsonl(sessionIdArg)
+  if (!jsonl) {
+    const target = sessionIdArg ? `id=${sessionIdArg}` : `cwd=${process.cwd()}`
+    process.stderr.write(`No session JSONL found for ${target}\n`)
+    return 1
+  }
+  const parsed = await parseSession(await transcriptPaths(jsonl))
+
+  const edited = new Map<string, string>()
+  const outside: string[] = []
+  const scope = new Set<string>()
+  for (const e of parsed.edits) {
+    const abs = canonicalPath(e.filePath)
+    if (!edited.has(abs)) edited.set(abs, e.tool)
+    const repo = await repoFor(abs)
+    if (repo) scope.add(repo)
+    else if (existsSync(abs) && !outside.includes(abs)) outside.push(abs)
+  }
+
+  const calls: Array<{ call: BashCall; repos: Set<string> }> = []
+  for (const call of parsed.bash) {
+    const repos = new Set<string>()
+    const readOnly = isReadOnly(call.command)
+    for (const p of [...call.cwds, ...commandPaths(call.command)]) {
+      const repo = await repoFor(p)
+      if (repo) repos.add(repo)
+    }
+    for (const r of repos) scope.add(r)
+    if (!readOnly) calls.push({ call, repos })
+  }
+  const callAt = (repo: string, ms: number | null, missingRel?: string) =>
+    ms === null
+      ? undefined
+      : calls.find(
+          (c) =>
+            c.repos.has(repo) &&
+            ms >= c.call.startMs - CALL_SLACK_MS &&
+            ms <= c.call.endMs + CALL_SLACK_MS &&
+            (missingRel === undefined || namesPath(c.call.command, missingRel)),
+        )
+
+  const blocking: Pending[] = []
+  const left: Array<Pending & { reason: string }> = []
+  const info = new Map<string, string[]>()
+  const repos = [...scope].sort()
+  for (const repo of repos) {
+    for (const { xy, rel } of await gitDirty(repo)) {
+      const isDir = rel.endsWith("/")
+      const abs = join(repo, rel).replace(/\/$/, "")
+      const label = `\`${xy.trim()}\` ${rel}`
+      let why: string | null = null
+      const tool = edited.get(abs) ?? (isDir ? [...edited].find(([p]) => p.startsWith(`${abs}/`))?.[1] : undefined)
+      if (tool) {
+        why = `edited (${tool})`
+      } else {
+        const hit = callAt(repo, changeMs(abs, isDir), existsSync(abs) ? undefined : rel)
+        if (hit) why = `bash \`${oneLine(hit.call.command)}\``
+      }
+      if (!why) {
+        const list = info.get(repo) ?? []
+        list.push(label)
+        info.set(repo, list)
+        continue
+      }
+      const item = { repo, label, key: abs, why }
+      const reason = leaves.get(abs)
+      if (reason) left.push({ ...item, reason })
+      else blocking.push(item)
+    }
+    for (const s of await gitStashes(repo)) {
+      const hit = callAt(repo, s.ms)
+      if (!hit) continue
+      const short = s.hash.slice(0, 12)
+      const key = `stash:${short}`
+      const item = { repo, label: `${key} \`${s.ref}: ${s.subject}\``, key, why: `bash \`${oneLine(hit.call.command)}\`` }
+      const reason = [...leaves].find(([k]) => k.startsWith("stash:") && s.hash.startsWith(k.slice(6)))?.[1]
+      if (reason) left.push({ ...item, reason })
+      else blocking.push(item)
+    }
+  }
+
+  const known = new Set([...blocking, ...left].map((i) => i.key))
+  for (const k of leaves.keys()) {
+    const matched = k.startsWith("stash:") ? [...known].some((x) => x.startsWith(k) || k.startsWith(x)) : known.has(k)
+    if (!matched) process.stderr.write(`warning: --leave ${k} matches no uncommitted session change\n`)
+  }
+
+  const byRepo = (items: Pending[], render: (i: Pending) => string): string => {
+    let s = ""
+    for (const repo of repos) {
+      const inRepo = items.filter((i) => i.repo === repo)
+      if (inRepo.length === 0) continue
+      s += line(`### ${basename(repo)} (${repo})`)
+      for (const i of inRepo) s += line(render(i))
+    }
+    return s
+  }
+
+  let out = ""
+  out += line(`# Uncommitted — session ${parsed.sessionId}`)
+  out += line(`Checked: ${new Date().toISOString()} · repos in scope: ${repos.length > 0 ? repos.map((r) => basename(r)).join(", ") : "(none)"}`)
+  out += line()
+  if (blocking.length > 0) {
+    out += line(`## Blocking (${blocking.length}) — dispose each: commit | discard | leave`)
+    out += byRepo(blocking, (i) => `- ${i.label} — ${i.why}`)
+  } else {
+    out += line("✓ Nothing blocking: every dirty change attributed to this session is committed, discarded or left.")
+  }
+  if (left.length > 0) {
+    out += line()
+    out += line(`## Left uncommitted (${left.length})`)
+    for (const i of left) out += line(`- ${i.key} — ${i.reason}`)
+  }
+  if (info.size > 0) {
+    out += line()
+    out += line("## Not attributed — dirty in scope repos, no session edit or call matches (info)")
+    for (const [repo, list] of info) {
+      out += line(`### ${basename(repo)} (${repo})`)
+      for (const l of list.slice(0, INFO_LIMIT)) out += line(`- ${l}`)
+      if (list.length > INFO_LIMIT) out += line(`- … ${list.length - INFO_LIMIT} more`)
+    }
+  }
+  if (outside.length > 0) {
+    out += line()
+    out += line("## Edited outside git (info)")
+    for (const p of outside.slice(0, INFO_LIMIT)) out += line(`- ${tildify(p)}`)
+    if (outside.length > INFO_LIMIT) out += line(`- … ${outside.length - INFO_LIMIT} more`)
+  }
+  process.stdout.write(out)
+  return blocking.length > 0 ? EXIT_BLOCKING : 0
+}
+
 async function main(): Promise<void> {
-  const ids = process.argv.slice(2)
+  const args = process.argv.slice(2)
+  const ids: string[] = []
+  const leaves = new Map<string, string>()
+  let uncommittedMode = false
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (a === "--uncommitted") uncommittedMode = true
+    else if (a === "--leave") parseLeave(leaves, args[++i])
+    else if (a.startsWith("--leave=")) parseLeave(leaves, a.slice("--leave=".length))
+    else ids.push(a)
+  }
+  if (uncommittedMode) {
+    if (ids.length > 1) {
+      process.stderr.write("--uncommitted takes at most one session id\n")
+      process.exit(1)
+    }
+    process.exitCode = await uncommitted(ids[0] ?? null, leaves)
+    return
+  }
+  if (leaves.size > 0) {
+    process.stderr.write("--leave only applies with --uncommitted\n")
+    process.exit(1)
+  }
   if (ids.length === 0) {
     const out = await report(null)
     if (out === null) process.exit(1)

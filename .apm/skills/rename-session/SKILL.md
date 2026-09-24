@@ -39,7 +39,9 @@ bun <skill-dir>/scripts/append-custom-title.ts --status <active|paused|done> --f
 
 Run outside the project sandbox. The script selects exactly one backend from `CODEX_THREAD_ID` or `CLAUDE_CODE_SESSION_ID`, writes the provider name, then best-effort updates a matching Paseo agent and seeds its workspace only when the workspace title is empty. Paseo absence or failure does not undo a provider rename.
 
-Echo the script's stdout as one line. If it exits non-zero, surface stderr verbatim and do not retry with a mutated name unless the user asks.
+Echo the script's stdout. If it exits non-zero, surface stderr verbatim and do not retry with a mutated name unless the user asks.
+
+`--status done` first runs the uncommitted gate (`session-status.ts --uncommitted`) and refuses with its `Blocking` list while a change this session made stays uncommitted. Pass `--leave <abs-path>=<reason>` (repeatable; `stash:<hash>=<reason>` for a stash) only for items `/done` already decided to leave; each is echoed as `left uncommitted:`. On refusal, go back to the gate step of `/done` — never add `--leave` just to get past it.
 
 ## Boundaries
 

@@ -263,6 +263,63 @@ test('keeps a successful provider rename when Paseo commands fail', () => {
   expect(paseoCalls()).toHaveLength(2)
 })
 
+test('refuses done while a file the session edited stays uncommitted', () => {
+  const file = join(initRepo(), 'a.txt')
+  writeFileSync(file, 'changed\n')
+  const jsonl = writeClaudeSession('claude-dirty', editRecord(file))
+
+  const result = run(['--status', 'done', 'impl/uncommitted-gate-probe'], {
+    CLAUDE_CODE_SESSION_ID: 'claude-dirty',
+  })
+
+  expect(result.success).toBe(false)
+  expect(result.stderr).toContain('a.txt — edited (Edit)')
+  expect(result.stderr).toContain('refusing done')
+  expect(readFileSync(jsonl, 'utf8')).not.toContain('custom-title')
+})
+
+test('refuses done for a Bash side effect inside the call window', () => {
+  const repo = initRepo()
+  writeFileSync(join(repo, 'bun.lock'), 'side effect\n')
+  writeClaudeSession('claude-bash', bashRecords(repo, 'bun add ai@7'))
+
+  const result = run(['--status', 'done', 'impl/uncommitted-gate-probe'], {
+    CLAUDE_CODE_SESSION_ID: 'claude-bash',
+  })
+
+  expect(result.success).toBe(false)
+  expect(result.stderr).toContain('bun.lock — bash `bun add ai@7`')
+})
+
+test('closes as done when the uncommitted file is explicitly left', () => {
+  const file = join(initRepo(), 'a.txt')
+  writeFileSync(file, 'changed\n')
+  const jsonl = writeClaudeSession('claude-left', editRecord(file))
+
+  const result = run(
+    ['--status', 'done', '--leave', `${file}=local toggle`, 'impl/uncommitted-gate-probe'],
+    { CLAUDE_CODE_SESSION_ID: 'claude-left' },
+  )
+
+  expect(result.success, result.stderr).toBe(true)
+  expect(result.stdout).toBe(
+    `(unnamed) → 🟢 impl/uncommitted-gate-probe\nleft uncommitted: ${file}=local toggle\n`,
+  )
+  expect(readFileSync(jsonl, 'utf8')).toContain('"customTitle":"🟢 impl/uncommitted-gate-probe"')
+})
+
+test('rejects --leave outside --status done', () => {
+  writeClaudeSession('claude-1', '{"type":"user"}\n')
+
+  const result = run(
+    ['--status', 'paused', '--leave', '/tmp/a.txt=reason', 'impl/uncommitted-gate-probe'],
+    { CLAUDE_CODE_SESSION_ID: 'claude-1' },
+  )
+
+  expect(result.success).toBe(false)
+  expect(result.stderr).toContain('--leave only applies with --status done')
+})
+
 test('drops the emoji from the title and swaps the status label for the current workspace', () => {
   writePaseoStub()
   writeCliClientId()
@@ -445,6 +502,35 @@ function runWorkspace(
     stdout: result.stdout.toString(),
     success: result.success,
   }
+}
+
+function initRepo(): string {
+  const repo = join(cwd, 'repo')
+  mkdirSync(repo)
+  writeFileSync(join(repo, 'a.txt'), 'initial\n')
+  const git = (...args: string[]) =>
+    Bun.spawnSync(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', '-C', repo, ...args])
+  git('init', '-q')
+  git('add', '.')
+  git('commit', '-qm', 'init')
+  return repo
+}
+
+function editRecord(filePath: string): string {
+  const content = [{ id: 'toolu_edit', input: { file_path: filePath }, name: 'Edit', type: 'tool_use' }]
+  return `${JSON.stringify({ message: { content }, timestamp: new Date().toISOString(), type: 'assistant' })}\n`
+}
+
+function bashRecords(repo: string, command: string): string {
+  const now = Date.now()
+  const use = { id: 'toolu_bash', input: { command }, name: 'Bash', type: 'tool_use' }
+  const result = { content: 'ok', tool_use_id: 'toolu_bash', type: 'tool_result' }
+  return [
+    { cwd: repo, message: { content: [use] }, timestamp: new Date(now - 5000).toISOString(), type: 'assistant' },
+    { cwd: repo, message: { content: [result] }, timestamp: new Date(now + 5000).toISOString(), type: 'user' },
+  ]
+    .map((record) => `${JSON.stringify(record)}\n`)
+    .join('')
 }
 
 function writeClaudeSession(sessionId: string, content: string): string {
