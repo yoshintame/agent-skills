@@ -1,8 +1,8 @@
 import { basename, isAbsolute, relative } from 'node:path'
 
-import { compact, isNil } from 'es-toolkit'
-import { match, P } from 'ts-pattern'
-import { z } from 'zod'
+import { compact, isNil } from 'es-toolkit@1.52.0'
+import { match, P } from 'ts-pattern@5.9.0'
+import { z } from 'zod@4.6.5'
 
 export function convert({ name, projectDir, project, pinnedByImage, fileSources }: ConvertInput): Conversion {
   const report: Report = { containers: [], port: null, postgres: null, secrets: [], dropped: [], unmapped: [], notes: [] }

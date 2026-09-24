@@ -53,6 +53,7 @@ bun <skill-dir>/scripts/compose-to-homelab.ts --name <name> --compose <dir>/comp
 - Образы linuxserver и прочие на s6-overlay: пользователь через `PUID`/`PGID` в env, без `user` и `--init`.
 - `connectsTo`: к чужому контейнеру обращайся по полному имени `<target>-<key>`, короткий алиас `<key>` может совпасть со своим.
 - URL-переменные приложения (`BASE_URL`, `APP_URL`, `*_ORIGIN`) — `https://<subdomain>.yoshintame.space`.
+- Header-auth (`one_factor` + `Remote-User`): Traefik приходит в контейнер с адреса шлюза сети сервиса, доверенная сеть прокси — пул Podman `10.89.0.0/16`.
 - `dashboard.iconUrl` = `https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/<slug>.png`; проверь, что отвечает 200.
 - `public = true` публикует только ingress cloudflared. CNAME `<subdomain>` на `<tunnelId>.cfargotunnel.com` (proxied) в Cloudflare создаёт человек, `tunnelId` — в `modules/infra/options.nix`.
 - Секреты: в файле только `secrets.env = ./secrets.yaml;`. Пароль Postgres не задавай в `needs.postgres.password`: `POSTGRES_PASSWORD` и строка подключения приложения с тем же паролем идут в тот же env. Значения в env без кавычек.

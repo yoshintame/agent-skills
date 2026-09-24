@@ -3,12 +3,12 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
-import { defineCommand, runMain } from 'citty'
-import $ from 'dax-sh'
-import { uniq } from 'es-toolkit'
-import { isEmpty } from 'es-toolkit/compat'
-import { match } from 'ts-pattern'
-import { z } from 'zod'
+import { defineCommand, runMain } from 'citty@0.2.2'
+import $ from 'dax-sh@0.42.0'
+import { uniq } from 'es-toolkit@1.52.0'
+import { isEmpty } from 'es-toolkit@1.52.0/compat'
+import { match } from 'ts-pattern@5.9.0'
+import { z } from 'zod@4.6.5'
 
 import { bindSourcesOf, convert, imagesOf, parseProject } from './convert'
 
