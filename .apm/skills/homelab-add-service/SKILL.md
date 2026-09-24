@@ -13,15 +13,19 @@ description: Добавить сервис в lasthaze-homelab.
 
 ## 2. Черновик скриптом
 
-Нужны сеть и `docker compose` или nix (скрипт сам берёт `docker-compose` и `crane` через `nix shell`), поэтому запускай вне sandbox:
+Скачай compose и файлы, на которые он ссылается (`env_file`, `extends`), в один каталог. Скрипт нормализует проект через `docker compose config`, пинит образы через `crane digest` и рендерит Nix через `lib.generators.toPretty`. Нужны сеть и `docker compose` или nix, поэтому запускай вне sandbox:
 
 ```
-bun <skill-dir>/scripts/compose-to-homelab.ts --name <name> --compose <url> [--compose pin.yml] [--env-file <url>] --out $TMPDIR/homelab-<name>
+bun <skill-dir>/scripts/compose-to-homelab.ts --name <name> --compose <dir>/compose.yml [--compose pin.yml] [--env-file <dir>/.env] --out $TMPDIR/homelab-<name>
 ```
 
-- Образ в compose на `latest` или без тега — второй `--compose` с override `services.<svc>.image: <repo>:<tag>` и повторный прогон; digest скрипт пересчитает.
-- Структуру черновика (тома, публикация порта, вынос секретов, переписанный хост БД) руками не переделывай. Значения env и ключи контейнеров правь: отладочные и демо-значения примера (`DEBUG=1`, `LOG_LEVEL=debug`) убери, ключ контейнера назови по роли (`server`, `worker`) вместе с его `dependsOn`/`networkVia`.
-- `report.json`: `secrets` уходят в sops (шаг 4); `postgres` и `rewrites` — что стало `needs.postgres` и где хост БД стал `postgres`; `flags` и `questions` закрой в файле или вынеси в отчёт; `ignored` — справка, действий не требует.
+- Образ на `latest` или без тега — второй `--compose` с override `services.<svc>.image: <repo>:<tag>` и повторный прогон.
+- Скопируй `default.nix` в `services/<name>/` и прогони `nix fmt`. Тома, порт и вынос секретов не переделывай. Значения env и ключи контейнеров правь: отладочные и демо-значения примера (`DEBUG=1`, `LOG_LEVEL=debug`) убери, ключ контейнера назови по роли (`server`, `worker`) вместе с его `dependsOn`/`networkVia`.
+- `report.json`:
+  - `secrets` — ключи, вынутые из env; добавь `secrets.env = ./secrets.yaml;` (шаг 4);
+  - `postgres` — сервис БД стал `needs.postgres`: в env приложения хост `postgres.service` замени на `postgres`, пароль БД — в секреты;
+  - `port` с `candidates` — порт не выбран, реши, какой контейнер отдаёт UI;
+  - `notes`, `unmapped`, `dropped` — закрой в файле или вынеси в отчёт.
 
 ## 3. Вопросы пользователю
 
