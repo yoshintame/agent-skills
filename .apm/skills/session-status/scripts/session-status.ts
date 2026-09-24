@@ -12,6 +12,7 @@ const WINDOW_BUFFER_MS = 60 * 60 * 1000
 const CALL_SLACK_MS = 2000
 const BASH_TIMEOUT_MS = Number(process.env.BASH_DEFAULT_TIMEOUT_MS) || 2 * 60 * 1000
 const BASH_MAX_TIMEOUT_MS = Number(process.env.BASH_MAX_TIMEOUT_MS) || 10 * 60 * 1000
+const SESSION_RUN_GAP_MS = 60 * 60 * 1000
 const INFO_LIMIT = 20
 const EXIT_BLOCKING = 2
 
@@ -90,6 +91,7 @@ async function parseSession(paths: string[]): Promise<Parsed> {
   let sessionId: string | null = null
   let startMs: number | null = null
   let endMs: number | null = null
+  const stamps: number[] = []
   for (const path of paths) {
     const text = await Bun.file(path).text()
     for (const line of text.split("\n")) {
@@ -102,6 +104,7 @@ async function parseSession(paths: string[]): Promise<Parsed> {
       if (!sessionId) sessionId = rec.sessionId ?? null
       const ms = isoToUnix(rec.timestamp ?? "")
       if (ms !== null) {
+        stamps.push(ms)
         if (startMs === null || ms < startMs) startMs = ms
         if (endMs === null || ms > endMs) endMs = ms
       }
@@ -139,8 +142,22 @@ async function parseSession(paths: string[]): Promise<Parsed> {
       }
     }
   }
-  for (const call of [...pending.values(), ...backgrounded.values()]) {
-    bash.push({ command: call.command, cwds: call.cwds, startMs: call.startMs, endMs: endMs ?? call.startMs })
+  stamps.sort((a, b) => a - b)
+  const runEnd = (from: number): number => {
+    let end = from
+    for (const t of stamps) {
+      if (t < from) continue
+      if (t - end > SESSION_RUN_GAP_MS) break
+      end = t
+    }
+    return end
+  }
+  for (const call of pending.values()) {
+    const end = call.background ? runEnd(call.startMs) : Math.min(endMs ?? call.startMs, call.startMs + call.timeoutMs)
+    bash.push({ command: call.command, cwds: call.cwds, startMs: call.startMs, endMs: Math.max(end, call.startMs) })
+  }
+  for (const call of backgrounded.values()) {
+    bash.push({ command: call.command, cwds: call.cwds, startMs: call.startMs, endMs: runEnd(call.startMs) })
   }
   return { sessionId, edits, bash, startMs, endMs }
 }
