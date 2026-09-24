@@ -13,19 +13,21 @@ description: Добавить сервис в lasthaze-homelab.
 
 ## 2. Черновик скриптом
 
-Скачай compose и файлы, на которые он ссылается (`env_file`, `extends`), в один каталог. Скрипт нормализует проект через `docker compose config`, пинит образы через `crane digest` и рендерит Nix через `lib.generators.toPretty`. Нужны сеть и `docker compose` или nix, поэтому запускай вне sandbox:
+Скачай compose и файлы, на которые он ссылается (`env_file`, `extends`), в один каталог. Скрипт нормализует проект через `docker compose config`, пинит образы через `crane digest` и рендерит Nix через `lib.generators.toPretty`. Нужны сеть и nix (`docker compose` и `crane` берутся через `nix shell`, если их нет в PATH), поэтому запускай вне sandbox:
 
 ```
 bun <skill-dir>/scripts/compose-to-homelab.ts --name <name> --compose <dir>/compose.yml [--compose pin.yml] [--env-file <dir>/.env] --out $TMPDIR/homelab-<name>
 ```
 
-- Образ на `latest` или без тега — второй `--compose` с override `services.<svc>.image: <repo>:<tag>` и повторный прогон.
-- Скопируй `default.nix` в `services/<name>/` и прогони `nix fmt`. Тома, порт и вынос секретов не переделывай. Значения env и ключи контейнеров правь: отладочные и демо-значения примера (`DEBUG=1`, `LOG_LEVEL=debug`) убери, ключ контейнера назови по роли (`server`, `worker`) вместе с его `dependsOn`/`networkVia`.
+- Образ на `latest` или без тега — второй `--compose` с override `services.<svc>.image: <repo>:<tag>` и повторный прогон; теги — `nix shell nixpkgs#crane -c crane ls <repo>`.
+- Скопируй `default.nix` в `services/<name>/` и прогони `nix fmt`. Отладочные и демо-значения примера (`DEBUG=1`, `LOG_LEVEL=debug`) убери.
+- Ключ контейнера — это и его DNS-алиас в сети сервиса. Переименовал ключ (или скрипт переименовал сервис compose, см. `notes`) — поменяй `dependsOn`, `networkVia` и хосты в env, которые на него ссылаются.
 - `report.json`:
-  - `secrets` — ключи, вынутые из env; добавь `secrets.env = ./secrets.yaml;` (шаг 4);
-  - `postgres` — сервис БД стал `needs.postgres`: в env приложения хост `postgres.service` замени на `postgres`, пароль БД — в секреты;
-  - `port` с `candidates` — порт не выбран, реши, какой контейнер отдаёт UI;
-  - `notes`, `unmapped`, `dropped` — закрой в файле или вынеси в отчёт.
+  - `containers` — какой сервис compose стал каким ключом;
+  - `secrets` — ключи, вынутые из env, с примером значения апстрима. Один и тот же ключ из разных контейнеров — одна строка общего env-файла. Ложное срабатывание (`*_KEY` с несекретным значением) верни в `environment`. Добавь `secrets.env = ./secrets.yaml;` (шаг 4);
+  - `postgres` — сервис `report.postgres.service` стал `needs.postgres`: этот хост в env приложения замени на `postgres`, пароль БД — в секреты;
+  - `port` — `candidates`: выбери контейнер с UI (гость `networkVia` может нести `port`, публикует его владелец); `null`: порт в compose не объявлен, возьми его из доков;
+  - `unmapped`, `notes`, `dropped` — закрой в файле или вынеси в отчёт. Хост-пути вне проекта не переносятся: данные — под `/var/lib/<name>`, файл-конфиг — `"${./file}:/target:ro"` из каталога сервиса.
 
 ## 3. Вопросы пользователю
 
@@ -76,4 +78,4 @@ printf '<name>-env: |\n  POSTGRES_PASSWORD=%s\n  DATABASE_URL=postgres://<user>:
 
 - Выбранные поля и основание для каждого.
 - Ручные шаги человека: шифрование `secrets.yaml`, CNAME для `public`, первый логин или создание админа.
-- Незакрытые `flags` и `questions` из `report.json`.
+- Незакрытые `unmapped` и `notes` из `report.json`.
