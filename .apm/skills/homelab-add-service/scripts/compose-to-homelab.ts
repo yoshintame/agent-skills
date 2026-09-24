@@ -8,6 +8,7 @@ import $ from 'dax-sh'
 import { uniq } from 'es-toolkit'
 import { isEmpty } from 'es-toolkit/compat'
 import { match } from 'ts-pattern'
+import { z } from 'zod'
 
 import { bindSourcesOf, convert, imagesOf, parseProject } from './convert'
 
@@ -76,10 +77,10 @@ async function pin(crane: string[], image: string): Promise<string> {
   if (image.includes('@sha256:')) return image
 
   const { stdout, stderr } = await $`${crane} digest ${image}`.noThrow().stdout('piped').stderr('piped')
-  const digest = stdout.trim()
-  if (!/^sha256:[0-9a-f]{64}$/.test(digest)) throw new Error(`crane digest ${image} failed: ${stderr.trim()}`)
+  const digest = imageDigest.safeParse(stdout.trim())
+  if (!digest.success) throw new Error(`crane digest ${image} failed: ${stderr.trim()}`)
 
-  return `${image}@${digest}`
+  return `${image}@${digest.data}`
 }
 
 async function renderNix(name: string, service: unknown): Promise<string> {
@@ -89,5 +90,7 @@ async function renderNix(name: string, service: unknown): Promise<string> {
 
   return `{\n  homelab.services.${name} = ${pretty};\n}\n`
 }
+
+const imageDigest = z.string().regex(/^sha256:[0-9a-f]{64}$/)
 
 runMain(main)
