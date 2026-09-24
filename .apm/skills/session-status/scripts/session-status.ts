@@ -674,10 +674,10 @@ function changeMs(abs: string, isDir: boolean): number | null {
   }
 }
 
-function namesPath(command: string, rel: string): boolean {
-  const segs = rel.split("/").filter(Boolean)
-  const base = segs.at(-1) ?? rel
-  return [...segs, base.replace(/\.[^.]+$/, "")].some((w) =>
+function namesPath(command: string, abs: string): boolean {
+  const gone = relative(nearestExistingDir(dirname(abs)), abs).split("/").filter(Boolean)
+  const base = gone.at(-1) ?? basename(abs)
+  return [...gone, base.replace(/\.[^.]+$/, "")].some((w) =>
     new RegExp(`(^|[^\\w.-])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\w-]|$)`).test(command),
   )
 }
@@ -740,7 +740,7 @@ async function uncommitted(sessionIdArg: string | null, leaves: Map<string, stri
     for (const r of repos) scope.add(r)
     if (!readOnly) calls.push({ call, repos })
   }
-  const callAt = (repo: string, ms: number | null, missingRel?: string) =>
+  const callAt = (repo: string, ms: number | null, missing?: string) =>
     ms === null
       ? undefined
       : calls.find(
@@ -748,7 +748,7 @@ async function uncommitted(sessionIdArg: string | null, leaves: Map<string, stri
             c.repos.has(repo) &&
             ms >= c.call.startMs - CALL_SLACK_MS &&
             ms <= c.call.endMs + CALL_SLACK_MS &&
-            (missingRel === undefined || namesPath(c.call.command, missingRel)),
+            (missing === undefined || namesPath(c.call.command, missing)),
         )
 
   const blocking: Pending[] = []
@@ -765,7 +765,7 @@ async function uncommitted(sessionIdArg: string | null, leaves: Map<string, stri
       if (tool) {
         why = `edited (${tool})`
       } else {
-        const hit = callAt(repo, changeMs(abs, isDir), existsSync(abs) ? undefined : rel)
+        const hit = callAt(repo, changeMs(abs, isDir), existsSync(abs) ? undefined : abs)
         if (hit) why = `bash \`${oneLine(hit.call.command)}\``
       }
       if (!why) {
