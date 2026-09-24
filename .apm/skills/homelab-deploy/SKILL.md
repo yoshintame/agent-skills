@@ -27,15 +27,14 @@ just --justfile ~/Development/personal/lasthaze-homelab/justfile --list
 
 ## Типы сервисов
 
-`deploy-wait <filter>` показывает статус и логи Docker-контейнера — работает только для **Docker (arion) сервисов**. NixOS-native сервисы проверяются через `systemctl`/`journalctl` напрямую.
+- **Контейнерные** — `services/<name>/` с `containers.<key>`: `virtualisation.oci-containers` под rootful Podman, контейнер `<name>-<key>`, юнит `podman-<name>-<key>.service`, сеть `<name>`, slice `homelab-<name>.slice` (дефис в имени экранирован: `systemd-escape <name>`). На боксе: `sudo podman ps -a`, `journalctl -u 'podman-<name>-*'`; остановить сервис целиком — `systemctl stop 'homelab-<name>.slice'`.
+- **NixOS-native** — `modules/infra/` и `services.<name>` NixOS: `tailscale ssh lasthaze-homelab 'journalctl -u <unit> -n 30 --no-pager'`.
 
-Определить тип: Docker-сервисы лежат в `services/` и используют `compose.rawFile` или `compose.services`; NixOS-native — в `modules/infra/` и используют `services.<name>`.
-
-Логи NixOS-native сервиса: `tailscale ssh lasthaze-homelab 'journalctl -u <unit> -n 30 --no-pager'`.
+`switch` может выйти с кодом 4 при рабочем сервисе: в failed попадают транзиентные юниты пробы healthcheck (`<64 hex>-<hex>.service`). `just failed` отделяет их от упавших сервисов, `deploy-wait` вызывает его сам.
 
 ## Pull deploy — `just deploy-wait <filter>`
 
-Штатный деплой сервисных изменений. Пушит в `main`, триггерит на боксе `homelab-deploy.service` (oneshot). Вызов `systemctl start` блокируется до завершения сборки (5–60 с), после чего показывает последние 20 записей журнала (результат сборки) и статус + логи Docker-контейнера по фильтру.
+Штатный деплой сервисных изменений. Пушит в `main`, триггерит на боксе `homelab-deploy.service` (oneshot). Вызов `systemctl start` блокируется до завершения сборки (5–60 с), после чего показывает последние 20 записей журнала (результат сборки), `just failed`, статус контейнеров и логи юнитов `podman-<filter>*`.
 
 Бокс собирает из `origin/main`, не из рабочего дерева. Деплоится только закоммиченный и запушенный код.
 
@@ -50,6 +49,16 @@ Dev-итерация без коммита: собирает из рабочег
 Рецепт автоматически обходит **1Password store-ssh gotcha**: `nix run …nixos-rebuild` использует SSH из nix store, а 1Password привязывает подпись к пути бинарника → `Permission denied`. Рецепт открывает system-SSH ControlMaster и перенаправляет nixos-rebuild через него (`NIX_SSHOPTS`).
 
 `action` по умолчанию `switch`. Для сетевых/SSH/firewall-изменений используй `test` — откатится при следующей перезагрузке (ручной magic-rollback).
+
+Часовой `homelab-deploy.timer` пересобирает бокс из `main` и затирает dev-поколение. `systemctl stop` таймера не держит: каждый `switch` запускает его снова, а `systemctl mask --runtime` проигрывает юниту из `/etc`. На серию dev-switch держи сам деплой runtime drop-in'ом, оба файла исчезают при ребуте:
+
+```
+mkdir -p /run/systemd/system/homelab-deploy.service.d
+printf '[Unit]\nConditionPathExists=!/run/homelab-deploy.hold\n' > /run/systemd/system/homelab-deploy.service.d/hold.conf
+touch /run/homelab-deploy.hold && systemctl daemon-reload
+```
+
+Снять: `rm /run/homelab-deploy.hold`, затем `just trigger`, если бокс должен вернуться на `main`.
 
 ## Одно изменение, одна топология
 
