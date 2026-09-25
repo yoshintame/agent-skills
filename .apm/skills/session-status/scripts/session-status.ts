@@ -598,7 +598,7 @@ const READ_ONLY = new Set([
 ])
 const GIT_READ_ONLY = new Set([
   "status", "log", "show", "diff", "rev-parse", "ls-files", "ls-tree", "blame", "grep", "cat-file", "describe", "reflog",
-  "shortlog", "branch", "remote", "config", "worktree", "tag", "for-each-ref", "merge-base", "rev-list", "check-ignore",
+  "shortlog", "branch", "remote", "config", "worktree", "tag", "for-each-ref", "merge-base", "rev-list", "check-ignore", "fetch", "ls-remote",
 ])
 const SHELL_WORDS = new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "{", "}", "done", "fi"])
 const WRAPPERS = new Set(["time", "nice", "command", "builtin", "xargs", "timeout"])
