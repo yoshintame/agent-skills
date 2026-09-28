@@ -1,50 +1,51 @@
 ---
 name: git-ref
-description: Give a clickable link that opens a GitLens "Search & Compare" view for two git refs in the editor (VSCode/Cursor). Use to review a batch of commits — the ones an AI agent just made, the current feature branch vs master, or two explicit refs. Triggers — "/git-ref", "дай ссылку на сравнение", "открой сравнение в gitlens", "сравни коммиты", "compare commits", "review my commits", "с веткой этой фичи".
+description: Open a commit set or range for review in Plannotator.
 ---
 
 # /git-ref
 
-Отдаёт в ответе кликабельную ссылку, открывающую в редакторе (VSCode/Cursor) GitLens-сравнение двух refs — лучший интерфейс для ревью пачки коммитов. Команда `gitlens.compareWith` с обоими refs пропускает пикер; deep link матчит уже открытый репозиторий по SHA, поэтому аргумент пути не нужен.
+The review runs in Plannotator, served from a throwaway clone whose HEAD is the right edge of the diff. Commit sets get a synthetic base/head pair, so only those commits' changes show up even when foreign commits sit between them.
 
-## Когда
+## Target
 
-Юзер хочет глазами отревьюить набор коммитов: то, что насыпал агент; фиче-ветку против базовой; произвольный диапазон.
+| Input | Pass to `open` |
+|---|---|
+| no arguments | `--session current` — commits this Claude Code session made on HEAD of `<repo>` |
+| `N` | `N` (`HEAD~N..HEAD`) |
+| two refs `<a> <b>` | `<a>...<b>` |
+| branch / "this feature" | `<master-or-main>...<branch>` |
+| explicit commit list | the SHAs, in any order |
 
-## Как определить refs
+`--session current` fails under Codex, or when a commit's subject is absent from the command that made it (message from `-F`). Then pass the SHAs of the commits you made, taken from your own context.
 
-1. **Явные хэши/refs в аргументах** — `/git-ref <ref1> <ref2>` → сравнить `ref1...ref2`.
-2. **Число N** — `/git-ref <N>` → `HEAD~N...HEAD`.
-3. **Ветка** («с веткой этой фичи», имя ветки) — `ref1` = базовая ветка (`master`/`main`), `ref2` = tip фиче-ветки. GitLens сам покажет three-dot дифф от merge-base, параллельный прогресс базы в дифф не попадёт.
-4. **Без аргументов** — коммиты, которые ты (агент) сделал в этой сессии: `HEAD~N...HEAD` по их числу. Если не уверен — `git rev-list --count @{u}..HEAD` (коммиты впереди upstream); если upstream нет — спроси N у юзера, не угадывай.
+## Open
 
-Инвариант: `ref1` — база (старое), `ref2` — новое (обычно `HEAD` / tip ветки). GitLens покажет изменения от `ref1` к `ref2`.
-
-## Запуск
+Run outside the sandbox (it writes `~/.cache/git-ref`, `~/.plannotator` and binds a loopback port). Always pass `-C`: cwd drifts between Bash calls.
 
 ```bash
-bash <skill-dir>/scripts/compare-link.sh -C <repo> <ref1> <ref2>
+bun <skill-dir>/scripts/git-ref.ts open -C <repo> <target>
 ```
 
-`-C <repo>` передавай всегда — cwd между вызовами Bash дрейфует, а молча собранная ссылка по чужому репо выглядит валидной.
+Output lines: `url:`, `review:` (review dir), `range:`, `stat:`, then `commit:` per commit or `source:` for a range. `reused: true` means a live server for the same target was returned as is.
 
-Скрипт резолвит refs в полные SHA (чтобы в пути deep link не было слешей из имён веток) и печатает две строки:
+`interleaved: <file> (foreign: <shas>)` — a foreign commit changed that file between two of the set's commits, so its diff carries the foreign change too. Tell the user which file; for a clean view open each set commit touching it on its own.
 
-- `deep:` — `<scheme>://eamodio.gitlens/link/r/<repoId>/compare/<sha1>...<sha2>?url=<origin|пусто>&path=<repo>` (схема редактора определяется из окружения);
-- `redirect:` — `https://vscode.dev/redirect?url=<encoded deep>` — единственная форма, кликабельная в чате (рендерер режет не-http(s) схемы).
+Then:
 
-## Ответ
+1. `mcp__paseo__browser_new_tab` with the `url`. Without Paseo tools, give the URL as a markdown link.
+2. Start `bun <skill-dir>/scripts/git-ref.ts wait <review>` with `run_in_background`, outside the sandbox. It blocks until the user submits, prints the decision and removes the clone.
+3. Reply with one line: what is under review (`commit:` lines or the range) and the `stat:`.
 
-В ответе отдай **markdown-ссылку на redirect-форму** + одну строку контекста: какой диапазон сравнивается и `git log --oneline` по нему.
+## Feedback
 
-```md
-[GitLens compare: <ref1>...<ref2>](https://vscode.dev/redirect?url=...)
-```
+`wait` prints `decision: approved | annotated | dismissed` and Plannotator's message. `annotated` — the message is the user's review: act on it in the real repo. `dismissed` — closed without feedback, do nothing.
 
-Авто-открытие (`--open` первым аргументом — скрипт сделает `open` deep-ссылки) — только по явной просьбе «открой» или когда рендера markdown нет (терминал). Если `open` заблокирован песочницей — перезапустить вне её: это открытие URI-схемы редактора, не сеть.
+`wait` exiting 1 with "without a decision" means the server died; the clone is kept, and re-running the same `open` reuses its path, so drafts survive.
 
-## Заметки
+## Notes
 
-- Ссылка обязана нести `?url=` и/или `?path=` — без обоих GitLens её вообще не парсит (`parseDeepLinkUri` возвращает undefined, молчаливый отказ). Скрипт всегда добавляет `path=<repo_root>`: по нему GitLens не только матчит открытые репо, но и сам подключает репо (`getOrAddRepository`), даже если оно не открыто в окне, принявшем URI.
-- `url=` стоит в query **первым и всегда** (пустым, если origin нет) — намеренно: `vscode.dev/redirect` дописывает свой `url=<весь deep link>` в query целевого URI, а `URLSearchParams.get('url')` в GitLens берёт первое вхождение. Без заслона GitLens принимает весь линк за remote и падает в промпт «Unable to find remote → Add Remote». Пустая строка falsy во всех проверках (`RemoteMatchUnneeded`) — remote-флоу пропускается.
-- Ручная альтернатива без агента: which-key `enter g k` (Compare References) — интерактивный пикер двух refs.
+- One-shot server: after Close or Approve the tab is dead. Another pass needs a new `open`.
+- "Open in editor" in Plannotator opens the clone under `~/.cache/git-ref`; edits there are lost. Edit the real repo.
+- To abandon a review without a decision: `git-ref.ts close <review>`. Reviews older than 7 days are killed and removed on the next `open`.
+- Plannotator comes from the global mise config (`github:backnotprop/plannotator`); if missing, `mise install`.
