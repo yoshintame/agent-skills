@@ -86,12 +86,8 @@ function freePort(): number {
   return port
 }
 
-async function plannotatorBin(): Promise<string> {
-  const onPath = Bun.which('plannotator')
-  if (onPath) return onPath
-  const viaMise = await $`mise which plannotator`.noThrow().quiet().text()
-  if (viaMise) return viaMise
-  fail('plannotator not found on PATH or via `mise which plannotator`')
+function plannotatorBin(): string {
+  return Bun.which('plannotator') ?? fail('plannotator not found on PATH')
 }
 
 async function resolveCommit(repo: string, ref: string): Promise<string> {
@@ -333,7 +329,7 @@ const open = defineCommand({
     const url = `http://localhost:${port}`
     const resultFile = join(dir, 'result.json')
     const child = spawn(
-      await plannotatorBin(),
+      plannotatorBin(),
       ['review', '--git', '--base', 'refs/review/base', '--diff-type', 'branch', '--no-git-remote-check', '--json'],
       {
         cwd: clone,

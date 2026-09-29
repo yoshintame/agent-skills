@@ -48,4 +48,4 @@ Then:
 - One-shot server: after Close or Approve the tab is dead. Another pass needs a new `open`.
 - "Open in editor" in Plannotator opens the clone under `~/.cache/git-ref`; edits there are lost. Edit the real repo.
 - To abandon a review without a decision: `git-ref.ts close <review>`. Reviews older than 7 days are killed and removed on the next `open`.
-- Plannotator comes from the global mise config (`github:backnotprop/plannotator`); if missing, `mise install`.
+- `plannotator` is a custom build from dotfiles (release tag plus the VSCode syntax theme patch) installed to `~/.local/bin`. Missing or stale: `plannotator-update --force`.
