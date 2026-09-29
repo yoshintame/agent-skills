@@ -5,8 +5,6 @@ description: Open a commit set or range for review in Plannotator.
 
 # /git-ref
 
-The review runs in Plannotator, served from a throwaway clone whose HEAD is the right edge of the diff. Commit sets get a synthetic base/head pair, so only those commits' changes show up even when foreign commits sit between them.
-
 ## Target
 
 | Input | Pass to `open` |
@@ -48,4 +46,4 @@ Then:
 - One-shot server: after Close or Approve the tab is dead. Another pass needs a new `open`.
 - "Open in editor" in Plannotator opens the clone under `~/.cache/git-ref`; edits there are lost. Edit the real repo.
 - To abandon a review without a decision: `git-ref.ts close <review>`. Reviews older than 7 days are killed and removed on the next `open`.
-- `plannotator` is a custom build from dotfiles (release tag plus the VSCode syntax theme patch) installed to `~/.local/bin`. Missing or stale: `plannotator-update --force`.
+- `open` fails fast when `plannotator` is not on `PATH`.

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -15,11 +15,16 @@ function git(...args: string[]): string {
   return res.stdout.toString().trim()
 }
 
-function commit(file: string, content: string, message: string): string {
+function commit(file: string, content: string, message: string, dates: Record<string, string> = {}): string {
   writeFileSync(join(repo, file), content)
   git('add', file)
-  git('commit', '-q', '-m', message)
+  const res = Bun.spawnSync(['git', '-C', repo, 'commit', '-q', '-m', message], { env: { ...env, ...dates } })
+  if (res.exitCode !== 0) throw new Error(res.stderr.toString())
   return git('rev-parse', 'HEAD')
+}
+
+function unixDates(authorMs: number, committerMs: number): Record<string, string> {
+  return { GIT_AUTHOR_DATE: `@${Math.floor(authorMs / 1000)} +0000`, GIT_COMMITTER_DATE: `@${Math.floor(committerMs / 1000)} +0000` }
 }
 
 function run(...args: string[]) {
@@ -44,7 +49,7 @@ beforeEach(() => {
     join(bin, 'plannotator'),
     `#!/usr/bin/env bun
 const server = Bun.serve({ port: Number(process.env.PLANNOTATOR_PORT), hostname: '127.0.0.1', fetch: () => new Response('ok') })
-await Bun.sleep(1500)
+await Bun.sleep(Number(process.env.FAKE_PLANNOTATOR_MS ?? 1500))
 console.log(JSON.stringify({ decision: 'annotated', message: 'fix a.txt' }))
 server.stop(true)
 process.exit(0)
@@ -117,4 +122,53 @@ test('commits on diverged branches are rejected', () => {
   const res = run('open', '-C', repo, side, main)
   expect(res.code).toBe(1)
   expect(res.err).toContain('do not lie on one line of history')
+})
+
+test('session commits are matched by author date and subject, surviving a re-signing rebase', () => {
+  const sessionId = '11111111-2222-3333-4444-555555555555'
+  const start = Date.now() - 24 * 60 * 60 * 1000
+  const iso = (ms: number) => new Date(ms).toISOString()
+  const projects = join(root, 'claude', 'projects', 'p')
+  mkdirSync(projects, { recursive: true })
+  writeFileSync(
+    join(projects, `${sessionId}.jsonl`),
+    [
+      { type: 'assistant', timestamp: iso(start), message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: `git-commit-atomic -C ${repo} --auto "feat(a): add a"` } }] } },
+      { type: 'user', timestamp: iso(start + 2000), message: { content: [{ type: 'tool_result', tool_use_id: 't1' }] } },
+    ]
+      .map((line) => JSON.stringify(line))
+      .join('\n'),
+  )
+  env.CLAUDE_CONFIG_DIR = join(root, 'claude')
+
+  commit('base.txt', 'base\n', 'init', unixDates(start - 60_000, start - 60_000))
+  commit('a.txt', 'a\n', 'feat(a): add a', unixDates(start + 1000, start + 3_600_000))
+  commit('b.txt', 'b\n', 'foreign commit in the same second', unixDates(start + 1000, start + 3_600_000))
+
+  const res = run('open', '-C', repo, '--session', sessionId)
+  expect(res.code).toBe(0)
+  expect(field(res.out, 'commit').map((l) => l.split(' ').slice(1).join(' '))).toEqual(['feat(a): add a'])
+  run('close', field(res.out, 'review')[0])
+})
+
+test('N reviews the last N commits, a live review is reused whole, close stops it', () => {
+  const base = commit('a.txt', 'a0\n', 'init')
+  commit('a.txt', 'a1\n', 'one')
+  const head = commit('b.txt', 'b\n', 'two')
+  env.FAKE_PLANNOTATOR_MS = '60000'
+
+  const first = run('open', '-C', repo, '2')
+  expect(first.code).toBe(0)
+  expect(field(first.out, 'range')).toEqual([`${base}..${head}`])
+  expect(field(first.out, 'source')).toEqual(['HEAD~2..HEAD'])
+
+  const second = run('open', '-C', repo, '2')
+  expect(second.out).toBe(`${first.out}reused: true\n`)
+
+  const [review] = field(first.out, 'review')
+  const { pid } = JSON.parse(readFileSync(join(review, 'state.json'), 'utf8'))
+  expect(run('close', review).code).toBe(0)
+  expect(existsSync(review)).toBe(false)
+  Bun.sleepSync(300)
+  expect(() => process.kill(pid, 0)).toThrow()
 })
