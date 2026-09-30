@@ -1,27 +1,29 @@
 #!/usr/bin/env bun
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { parseArgs } from "node:util";
+import { PROJECTS, cwdOf, titleOf, transcriptsOf } from "./session-meta.ts";
 
 const HOME = process.env.HOME ?? "";
-const PROJECTS = `${HOME}/.claude/projects`;
+const PASEO_AGENTS = `${process.env.PASEO_HOME ?? `${HOME}/.paseo`}/agents`;
 const IDE_LOCKS = `${HOME}/.claude/ide`;
 const DEEP_LINK = "vscode://anthropic.claude-code/open?session=";
 
 const HELP = `
-open-session — open a Claude Code session in a VSCode window rooted at its own cwd
+open-session — open a Claude Code session in a VSCode window rooted at its own cwd, or in Paseo
 
 Usage:
-  open-session <session-id> [--prompt <text>] [--dry-run]
+  open-session <session-id> [--paseo] [--prompt <text>] [--dry-run]
 
-  --prompt   prefill the session's input box
+  --paseo    open as a Paseo agent: focus the existing one, else import it
+  --prompt   prefill the session's input box (VSCode only)
   --dry-run  resolve and report, spawn nothing
 
-Exit codes: 0 opened / 2 usage / 3 transcript not found / 4 window never came up
+Exit codes: 0 opened / 2 usage / 3 transcript not found / 4 window never came up / 5 paseo failed
 `.trimStart();
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
-  options: { prompt: { type: "string" }, "dry-run": { type: "boolean" }, help: { type: "boolean", short: "h" } },
+  options: { paseo: { type: "boolean" }, prompt: { type: "string" }, "dry-run": { type: "boolean" }, help: { type: "boolean", short: "h" } },
 });
 
 if (values.help || positionals.length !== 1) {
@@ -41,28 +43,52 @@ function fail(line: string, code: number): never {
 const id = positionals[0]!.trim().replace(/^.*session=/, "");
 if (!/^[0-9a-fA-F-]{8,}$/.test(id)) fail(`not a session id: ${positionals[0]}`, 2);
 
-// ─── cwd: read it from the transcript, never from the project-dir name ───
-// The dir name is cwd with [^a-zA-Z0-9] collapsed to '-', which is lossy and
-// does not invert. Every JSONL row carries the real cwd.
-const transcripts: string[] = [];
-for await (const p of new Bun.Glob(`**/${id}.jsonl`).scan({ cwd: PROJECTS, absolute: true })) transcripts.push(p);
+const transcripts = await transcriptsOf(id);
 if (transcripts.length === 0) fail(`no transcript for ${id} under ${PROJECTS}`, 3);
-
-const cwdOf = async (file: string): Promise<string | null> => {
-  const head = await Bun.file(file).slice(0, 256 * 1024).text();
-  for (const line of head.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const cwd = JSON.parse(line).cwd;
-      if (typeof cwd === "string" && cwd) return cwd;
-    } catch { }
-  }
-  return null;
-};
 
 const cwds = [...new Set((await Promise.all(transcripts.map(cwdOf))).filter((c): c is string => c !== null))];
 if (cwds.length === 0) fail(`transcript carries no cwd: ${transcripts[0]}`, 3);
 const cwd = cwds[0]!;
+const title = transcripts.map(titleOf).find((t) => t !== null);
+
+say(`${id}${title ? `  ${title}` : ""}`);
+say(`cwd: ${cwd}${cwds.length > 1 ? `  (also: ${cwds.slice(1).join(", ")})` : ""}`);
+
+if (values.paseo) await openInPaseo();
+
+type PaseoAgent = { id: string; archived: boolean; mtime: number };
+
+function paseoAgentOf(sessionId: string): PaseoAgent | null {
+  const found: PaseoAgent[] = [];
+  for (const file of new Bun.Glob("*/*.json").scanSync({ cwd: PASEO_AGENTS, absolute: true })) {
+    try {
+      const a = JSON.parse(readFileSync(file, "utf8"));
+      if (a.persistence?.sessionId !== sessionId) continue;
+      found.push({ id: a.id, archived: a.archivedAt != null, mtime: Bun.file(file).lastModified });
+    } catch { }
+  }
+  found.sort((x, y) => Number(x.archived) - Number(y.archived) || y.mtime - x.mtime);
+  return found[0] ?? null;
+}
+
+function paseo(args: string[]): void {
+  const r = Bun.spawnSync(["paseo", ...args], { stdout: "pipe", stderr: "pipe" });
+  if (r.exitCode !== 0) fail(`paseo ${args.join(" ")} failed: ${(r.stderr.toString() || r.stdout.toString()).trim()}`, 5);
+}
+
+async function openInPaseo(): Promise<never> {
+  const existing = paseoAgentOf(id);
+  const live = existing && !existing.archived ? existing : null;
+  say(`paseo: ${live ? `agent ${live.id} — opening` : existing ? `agent ${existing.id} archived — re-importing` : "not imported — importing"}`);
+  if (values["dry-run"]) process.exit(0);
+
+  if (!live) paseo(["import", id, "--provider", "claude", "--cwd", cwd, "-q"]);
+  const agent = live ?? paseoAgentOf(id);
+  if (!agent || agent.archived) fail(`paseo import of ${id} left no live agent`, 5);
+  paseo(["agent", "open", agent.id]);
+  say(`opened paseo agent ${agent.id}`);
+  process.exit(0);
+}
 
 // ─── is a live window already rooted there? ───
 // Each VSCode window's Claude Code extension writes ~/.claude/ide/<port>.lock
@@ -84,8 +110,6 @@ const windowIsUp = (): boolean => {
 const url = `${DEEP_LINK}${id}${values.prompt ? `&prompt=${encodeURIComponent(values.prompt)}` : ""}`;
 const alreadyUp = windowIsUp();
 
-say(`${id}`);
-say(`cwd: ${cwd}${cwds.length > 1 ? `  (also: ${cwds.slice(1).join(", ")})` : ""}`);
 say(`window: ${alreadyUp ? "already open — focusing it" : "not open — launching"}`);
 say(`url: ${url}`);
 

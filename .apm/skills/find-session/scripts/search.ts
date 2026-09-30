@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
-import { readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { PROJECTS, titleOf } from "./session-meta.ts";
 
 const ASSET = fileURLToPath(new URL("../assets/cc.sql", import.meta.url));
 const DB = `${process.env.HOME}/.claude/cc.duckdb`;
-const PROJECTS = `${process.env.HOME}/.claude/projects`;
 
 const RU_STOP = new Set("для и во в на с со по к ко у о об что как это не но а же ли от до из за при я мне меня мной ты".split(" "));
 const EN_STOP = new Set("the for a an to of in on and or with is are my me i it this that".split(" "));
@@ -53,7 +54,7 @@ function parseArgs(argv: string[]): Args {
   }
   if (a.synonyms.length === 0) {
     console.error('usage: search.ts "<words>" [...] [--bm25 [--full] [--rebuild] [--no-fold]] [--kind=K] [--tool=NAME] [--project=SLUG] [--since=DATE] [--until=DATE] [--sessions] [--link] [--distinct] [--limit=N] [--no-stem] [--sql]');
-    console.error('       open-session.ts <session-id>   # actually open it, in a window on its own cwd');
+    console.error('       open-session.ts <session-id> [--paseo]   # actually open it: VSCode window on its cwd, or Paseo agent');
     process.exit(2);
   }
   return a;
@@ -75,15 +76,31 @@ function clause(phrase: string, stem: boolean): string | null {
   return `m.text ILIKE '%' || ${parts.join(" || '%' || ")} || '%'`;
 }
 
-type DuckOpts = { init?: boolean; db?: string; csv?: boolean };
+type DuckOpts = { init?: boolean; db?: string; csv?: boolean; json?: boolean };
 function duck(sql: string, opts: DuckOpts = {}): { ok: boolean; out: string; err: string } {
   const cmd = ["duckdb"];
   if (opts.init) cmd.push("-init", ASSET);
   if (opts.csv) cmd.push("-csv", "-noheader");
+  if (opts.json) cmd.push("-json");
   if (opts.db) cmd.push(opts.db);
   cmd.push("-c", sql);
   const r = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe" });
   return { ok: r.exitCode === 0, out: r.stdout.toString(), err: r.stderr.toString() };
+}
+
+function withTitles(json: string): string {
+  const rows = JSON.parse(json.trim() || "[]") as Record<string, unknown>[];
+  if (rows.length === 0) return "";
+  const titled = rows.map(({ project, session_id, ...rest }) => ({
+    project, session_id, title: titleOf(`${PROJECTS}/${project}/${session_id}.jsonl`) ?? "", ...rest,
+  }));
+  const tmp = `${tmpdir()}/find-session-${process.pid}.json`;
+  writeFileSync(tmp, JSON.stringify(titled));
+  try {
+    return duck(`SELECT * FROM read_json('${sq(tmp)}', format='array');`).out;
+  } finally {
+    unlinkSync(tmp);
+  }
 }
 
 const args = parseArgs(Bun.argv.slice(2));
@@ -184,7 +201,7 @@ if (args.bm25) {
            row_number() OVER (PARTITION BY fk ORDER BY score DESC, last_seen DESC) AS rn
          FROM keyed)
        SELECT project, session_id, round(score, 2) AS score, round(total, 2) AS total, hits, forks,
-         first_seen, last_seen, '${DEEP_LINK}' || session_id AS link
+         first_seen, last_seen${args.link ? `, '${DEEP_LINK}' || session_id AS link` : ""}
        FROM folded${args.noFold ? "" : " WHERE rn = 1"} ORDER BY score DESC LIMIT ${args.limit};`
     : `LOAD fts;
        SELECT ts::date AS dt, project,${needsMsg ? " kind, tool," : ""} round(score, 2) AS score,
@@ -194,13 +211,13 @@ if (args.bm25) {
   if (args.showSql) { console.log(querySql); process.exit(0); }
 
   if (args.rebuild) build();
-  let r = duck(querySql, { db: DB });
-  if (!r.ok && /does not exist|Catalog Error|fts_main_|Binder Error|Referenced column/i.test(r.err)) { build(); r = duck(querySql, { db: DB }); }
+  let r = duck(querySql, { db: DB, json: args.sessions });
+  if (!r.ok && /does not exist|Catalog Error|fts_main_|Binder Error|Referenced column/i.test(r.err)) { build(); r = duck(querySql, { db: DB, json: args.sessions }); }
 
   const meta = duck(`SELECT count(*), max(ts)::date FROM ${table};`, { db: DB, csv: true }).out.trim().split(",");
   console.error(`bm25 ${table} rows=${meta[0] ?? "?"} newest=${meta[1] ?? "?"} (reuse; --rebuild to refresh)\nq: ${args.synonyms.join(" ")}`);
 
-  process.stdout.write(r.out);
+  process.stdout.write(args.sessions && r.ok ? withTitles(r.out) : r.out);
   const realErr = r.err.split("\n").filter((l) => l.trim() && !l.includes("Loading resources")).join("\n");
   if (realErr) { process.stderr.write(realErr + "\n"); if (!r.ok) process.exit(1); }
   process.exit(0);
@@ -244,7 +261,7 @@ const stems = stem
   : args.synonyms;
 console.error(`view=${view} stem=${stem} distinct=${args.distinct} limit=${args.limit}\nterms: ${stems.join("  |  ")}`);
 
-const r = duck(select.replace(/^/, stem ? "LOAD fts;\n" : ""), { init: true });
-process.stdout.write(r.out);
+const r = duck(select.replace(/^/, stem ? "LOAD fts;\n" : ""), { init: true, json: args.sessions });
+process.stdout.write(args.sessions && r.ok ? withTitles(r.out) : r.out);
 const realErr = r.err.split("\n").filter((l) => l.trim() && !l.includes("Loading resources")).join("\n");
 if (realErr) { process.stderr.write(realErr + "\n"); if (!r.ok) process.exit(1); }
