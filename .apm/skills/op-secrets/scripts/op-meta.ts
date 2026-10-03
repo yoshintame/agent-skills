@@ -14,6 +14,17 @@ const GET_ALL_CHUNK = 50
 
 const isSecret = (f: ItemField) => SECRET_TYPES.has(f.fieldType)
 const filled = (f: ItemField) => f.value !== ''
+const safeUrl = (raw: string): string => {
+  try {
+    const u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`)
+    const segments = u.pathname.split('/').filter(Boolean)
+    const path = segments.slice(0, 2).map((x) => (x.length > 32 ? '…' : x)).join('/')
+    const cut = segments.length > 2 || u.search || u.hash || segments.some((x) => x.length > 32)
+    return `${u.origin}${path ? `/${path}` : ''}${cut ? ' [trimmed]' : ''}`
+  } catch {
+    return '[unparsable url]'
+  }
+}
 const ref = (it: Item, f: ItemField) => `op://${it.vaultId}/${it.id}/${f.sectionId ? `${f.sectionId}/` : ''}${f.id}`
 
 const accountId = (): string => {
@@ -96,7 +107,7 @@ const items = defineCommand({
     const q = args.query?.toLowerCase()
     for (const v of await scopeVaults(args.vault)) {
       for (const o of (await listItems(v, args.archived)) ?? []) {
-        const urls = o.websites.map((w) => w.url).join(',')
+        const urls = o.websites.map((w) => safeUrl(w.url)).join(',')
         if (q && !`${o.title} ${urls}`.toLowerCase().includes(q)) continue
         console.log([o.id, v.title, o.category, o.title, urls, o.tags.join(',')].join('\t'))
       }
@@ -184,7 +195,7 @@ const inventory = defineCommand({
             category: it.category,
             title: it.title,
             username: it.fields.find((f) => f.id === 'username')?.value || null,
-            websites: it.websites.map((w) => w.url),
+            websites: it.websites.map((w) => safeUrl(w.url)),
             tags: it.tags,
             createdAt: it.createdAt,
             updatedAt: it.updatedAt,
