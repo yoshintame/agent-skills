@@ -10,6 +10,13 @@ Run this only when the user explicitly asked to merge or land a branch — never
 - **No argument (default)** → land, then remove the branch's worktree and delete the now-merged branch.
 - **`keep`** (`/wt-land keep`) → land only; leave the worktree and branch in place. This is the old behaviour.
 
+## Squash fixups before landing
+
+- Fold every fixup into the commit it fixes: one-line tweaks, review follow-ups, intermediate attempts that amend or replace code an earlier commit of the same branch introduced. Each remaining commit is one self-contained change. Rewriting pushed commits needs a force-push: get the user's approval first.
+- This is not the squash or rebase Land forbids: never collapse the whole branch into one commit, and keep the branch on its own base.
+- Rebuild in the branch's worktree: `git switch --detach <base>`, per group `git cherry-pick -n <sha>…` and one `git commit`, then `git branch -f <branch> HEAD && git switch <branch>`. The final tree must equal the old tip's. A group that is a contiguous run of old commits must also match its last commit (`HEAD^{tree}` = `<last-sha>^{tree}`); a fixup folded across an unrelated commit breaks that match by design, so check those groups only by the final tree.
+- Already landed: `git reset --keep <merge>^1` in the primary, rebuild, land again; if the default branch is pushed, that is a force-push too and needs approval.
+
 ## Land
 
 - From the branch's worktree: `wt land` — the worktrunk alias expands to `git -C <primary> merge --no-ff <branch>`. Or run that `git merge --no-ff <branch>` in the primary yourself.
