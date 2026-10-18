@@ -3,7 +3,7 @@ name: homelab-add-service
 description: Добавить сервис в lasthaze-homelab.
 ---
 
-Репо `~/Development/personal/lasthaze-homelab`, работа в отдельном worktree (`/wt-workflow`). Сервис — один файл `services/<name>/default.nix`, в нём только `homelab.services.<name>`. Схема — `modules/service-options.nix`, `modules/collectors/*.nix`, `modules/runtimes/podman.nix`; прочитай их до записи файла. Эталоны с разбором — [examples.md](references/examples.md).
+Репо `~/Development/personal/lasthaze-homelab`, работа в отдельном worktree (`/wt-workflow`). Сервис — один файл `services/<name>/default.nix`, в нём только `homelab.services.<name>`. Схема — `modules/service-options/`, `modules/collectors/`, `modules/runtimes/podman.nix`; прочитай их до записи файла. Эталоны с разбором — [examples.md](references/examples.md).
 
 ## 1. Апстрим
 
@@ -37,7 +37,7 @@ bun <skill-dir>/scripts/compose-to-homelab.ts --name <name> --compose <dir>/comp
 |---|---|---|
 | `subdomain` | короткое имя назначения (`budget`, `docs`, `rss`) | не `auth`/`traefik` и не занятые (flake check проверит). `null` — сервис без Traefik, Authelia и AdGuard, единственный вход `tailscale serve`: для API-серверов агентов без браузерного UI; требует `tailnet`, несовместим с `public`, `health.external` и `dashboard` |
 | контур | приватный | `public = true` — только если нужен доступ без tailnet; `tailnet` — только для клиентов, которым нужен `*.ts.net` |
-| `auth` | `one_factor` | политика Authelia — на весь поддомен, без исключений по путям. Нативные клиенты или API → `bypass` (побеждает остальное); только браузер и есть trusted header → `one_factor` + header-auth на `Remote-User`; админка или чувствительные данные → `two_factor`. OIDC-провайдера в Authelia нет |
+| `auth` | `one_factor` | политика Authelia на поддомен. Нативные клиенты на весь сервис → `bypass`; браузерный UI плюс API для мобильного клиента → `one_factor` и `authRules = [ { resources = [ "^/api([/?].*)?$" ]; policy = "bypass"; } ]`; только браузер и есть trusted header → `one_factor` + header-auth на `Remote-User`; админка или чувствительные данные → `two_factor`. OIDC-провайдера в Authelia нет |
 | `needs.postgres` | выделенный, если в compose есть Postgres | общий кластер пока отклоняется assertion; спроси, только если приложение умеет SQLite |
 | `egress` | `true` | `false`, если приложению не нужен интернет (нет фидов, вебхуков, загрузки моделей) |
 | секреты | имена из `report.secrets` | покажи список, значения генерирует и шифрует человек |
@@ -49,7 +49,9 @@ bun <skill-dir>/scripts/compose-to-homelab.ts --name <name> --compose <dir>/comp
 
 Правила ниже `nix flake check` не ловит:
 
-- Данные — подкаталоги `/var/lib/<name>/<sub>`, по одному на назначение (`data`, `media`, `config`).
+- Своё состояние — подкаталоги `/var/lib/<name>/<sub>`, по одному на назначение (`data`, `config`). Медиа, общие с другими сервисами, — под `config.homelab.media.root` (`/mnt/media/data`), `PUID`/`PGID` из `config.users.users.media`; в бэкап они сами не попадают.
+- Конфиг с секретами, которые приложение не читает из env, или файл, который приложение само переписывает, — `containers.<key>.configFiles` с дырками `${KEY}` и `${service.KEY}`, рендер на каждом старте. Файл без секретных дырок — `:ro` через `volumes`, иначе assertion.
+- Состояние внутри приложения (объекты его API: индексеры, клиенты, библиотеки) своим заданием или скриптом не настраивается. Есть OpenTofu-провайдер — поле `tofu` с модулем `services/<name>/tofu.nix` и пином провайдера в `modules/collectors/tofu/providers.nix`. Провайдера нет — это runtime-данные под бэкапом, первичная настройка руками и пунктом в отчёте.
 - Образы linuxserver и прочие на s6-overlay: пользователь через `PUID`/`PGID` в env, без `user` и `--init`.
 - `connectsTo`: к чужому контейнеру обращайся по полному имени `<target>-<key>`, короткий алиас `<key>` может совпасть со своим.
 - Native-сервис хоста (Grafana, Prometheus) — `hostPorts = [ <порт> ]` и адрес `host.containers.internal:<порт>`: порт открывается только на интерфейсе сети этого сервиса. Wildcard `podman+` в файрволе не трогай — он открыл бы порт всем контейнерам.
@@ -73,7 +75,7 @@ printf '<name>-env: |\n  POSTGRES_PASSWORD=%s\n  DATABASE_URL=postgres://<user>:
 
 1. `git add -N services/<name>` — флейк видит только tracked-файлы.
 2. `nix flake check`. Каждое сообщение assertion говорит, что поправить; не обходи его через `extraOptions`.
-3. После шифрования секрета — `nix run .#dev-<name>`: все контейнеры healthy, приложение отвечает на `127.0.0.1:<hostPort>`. `connectsTo` в dev не воспроизводится, `egress = false` соблюдается только под podman.
+3. После шифрования секрета — `nix run .#dev-<name>`: все контейнеры healthy, приложение отвечает на `127.0.0.1:<hostPort>`. `connectsTo` в dev не воспроизводится, `egress = false` соблюдается только под podman, юнит `tofu` не запускается.
 4. Коммит — `/git-commit`. Деплой — `/homelab-deploy`, push только по просьбе пользователя.
 
 ## 6. Отчёт

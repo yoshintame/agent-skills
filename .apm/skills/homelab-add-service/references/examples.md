@@ -87,3 +87,45 @@ powersync-env: |
 - `password` не задан: `POSTGRES_PASSWORD` и строки подключения с паролем приходят из `secrets.env` во все контейнеры сервиса.
 - `md5` только потому, что клиент PowerSync не умеет SCRAM; по умолчанию оставляй `scram-sha-256`.
 - Конфиг-файл монтируется из store (`${./config/service.yaml}`); секреты в нём — через `!env`, не литералами.
+
+## Prowlarr — API для мобильного клиента, состояние через OpenTofu
+
+```nix
+{
+  homelab.services.prowlarr = {
+    subdomain = "prowlarr";
+    auth = "one_factor";
+    authRules = [
+      {
+        resources = [ "^/api([/?].*)?$" ];
+        policy = "bypass";
+      }
+    ];
+    secrets.env = ./secrets.yaml;
+    containers.server = {
+      image = "lscr.io/linuxserver/prowlarr:2.6.5.5623-ls163@sha256:f9151e5bc1025c6d0a630d503210cdcb6bb55a7cc098562609d96a408d838902";
+      port = 9696;
+      connectsTo = [ "decypharr" ];
+      volumes = [ "/var/lib/prowlarr/config:/config" ];
+      environment.PROWLARR__AUTH__METHOD = "External";
+      healthcheck = {
+        test = "curl -fsS http://127.0.0.1:9696/ping >/dev/null";
+        startPeriod = 60;
+      };
+    };
+    tofu = {
+      module = ./tofu.nix;
+      dependsOn = [ "server" ];
+      secrets = {
+        api_key = "PROWLARR__AUTH__APIKEY";
+        decypharr_token = "decypharr.API_TOKEN";
+      };
+    };
+  };
+}
+```
+
+- UI закрыт `one_factor`, а `authRules` открывает `^/api` мобильному клиенту: API всё равно требует ключ Prowlarr.
+- `PROWLARR__AUTH__METHOD = "External"` выключает встроенный логин, вход проверяет Authelia; ключ API задаётся env из `secrets.env`.
+- Индексеры и download-клиент ведёт `tofu`: terranix-модуль `tofu.nix` с ресурсами провайдера `devopsarr/prowlarr`, адрес приложения приходит аргументом `appUrl`. `secrets` становятся переменными `sensitive`, `decypharr.API_TOKEN` берётся из `secrets.env` сервиса `decypharr`. В `secrets.yaml` нужен ещё `TOFU_STATE_PASSPHRASE` для шифрования state.
+- Уже созданные в приложении объекты принимаются в state разовыми блоками `import` с ID из API, иначе первый apply создаст дубли.
