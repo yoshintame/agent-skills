@@ -72,21 +72,6 @@ tailscale ssh lasthaze-homelab 'sudo nixos-rebuild --rollback switch'
 
 Или выбери предыдущее поколение в systemd-boot. Быстрее версионного пина (без пересборки) — поэтому homelab-инпут плавает, а не пинится.
 
-## Отложить и вернуть данные сервиса
-
-Команда, которая откладывает или возвращает каталоги сервиса на боксе, должна переживать повторный запуск: человек может вставить её дважды. Каждый `rm` и `mv` — только после проверки, что источник на месте, а цель свободна.
-
-```sh
-set -e
-d=/var/lib/<svc>
-[ -d $d/config.bak ] || { echo "нет $d/config.bak, ничего не трогаю" >&2; exit 1; }
-systemctl stop homelab-<svc>.slice
-rm -rf $d/config
-mv $d/config.bak $d/config
-```
-
-Откладывание — зеркально: `[ ! -e $d/config.bak ]` перед `mv $d/config $d/config.bak`, иначе второй запуск вложит `config` внутрь `config.bak`.
-
 ## Bootstrap-факты (для отладки сломанного деплоя, не для рутины)
 
 - Бокс тянет оба репо двумя read-only **deploy-ключами** из sops `secrets/homelab/deploy.yaml`, разведёнными по ssh-алиасам: `github.com` → ключ homelab, `dotfiles.github.com` → ключ dotfiles (один deploy key не покрывает два репо на GitHub).
