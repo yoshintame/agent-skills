@@ -1,19 +1,19 @@
 ---
 name: apm-deps
-description: Manage global MCP servers and skill packages through APM.
+description: Глобальные MCP-серверы и пакеты скилов через APM.
 ---
 
-Global MCP servers and skill packages for Claude Code and Codex have one source: `$DOTFILES/modules/home/apm/config/apm.yml` (`targets: [claude, codex]`). Change them there only. Not `claude mcp add`, not `codex mcp add`, not a claude.ai connector, not hand edits to `~/.claude.json` or `~/.codex/config.toml`: the server lands in one provider, and `~/.codex/config.toml` is relinked on every switch, dropping hand edits.
+У глобальных MCP-серверов и пакетов скилов Claude Code и Codex один источник: `$DOTFILES/modules/home/apm/config/apm.yml` (`targets: [claude, codex]`). Меняй их только там. Не через `claude mcp add`, не через `codex mcp add`, не коннектором claude.ai и не ручной правкой `~/.claude.json` или `~/.codex/config.toml`: сервер окажется только у одного провайдера, а `~/.codex/config.toml` перелинковывается при каждом switch, и ручные правки пропадают.
 
-## MCP server
+## MCP-сервер
 
-Entry under `dependencies.mcp`, always `registry: false`:
+Запись в `dependencies.mcp`, всегда с `registry: false`:
 
 ```yaml
 - name: example
   registry: false
   transport: stdio
-  command: bunx            # one binary; every argument goes to args
+  command: bunx            # один бинарь; все аргументы — в args
   args: [-y, 'example-mcp@1.2.3']
   env:
     EXAMPLE_TOKEN: ${EXAMPLE_TOKEN}
@@ -23,14 +23,14 @@ Entry under `dependencies.mcp`, always `registry: false`:
   url: https://example.com/mcp
 ```
 
-- **Secret** — only `${VAR}` in `apm.yml`; the value lives in SOPS `$DOTFILES/modules/home/apm/secrets.yaml`. Don't read or print it: the user adds it with `sops <file>`, or pipe it from 1Password (resolve the `op://` reference via `/op-secrets`, run outside the sandbox):
+- **Секрет** — в `apm.yml` только `${VAR}`, значение лежит в SOPS `$DOTFILES/modules/home/apm/secrets.yaml`. Не читай и не печатай его: пользователь добавляет его через `sops <file>`, либо значение пайпится из 1Password (`op://`-ссылку найди через `/op-secrets`, запускай вне песочницы):
 
   ```
   VAR="op://<vault>/<item>/<field>" op run -- sh -c 'printf %s "$VAR" | jq -Rs . | sops set --value-stdin "$DOTFILES/modules/home/apm/secrets.yaml" "[\"VAR\"]"'
   ```
 
-  `dot:mcp` aborts when a `${VAR}` is missing from SOPS.
-- **Secret in an HTTP header** — the Codex adapter writes `${VAR}` in headers literally. Map it for Codex under `extra:` (`bearer_token_env_var` for `Authorization: Bearer`, `env_http_headers` for any other header), and export the variable for Codex at runtime with a `set -gx VAR ${VAR}` line in `$DOTFILES/modules/home/apm/config/mcp-secrets.fish.tmpl`. Codex sees it only when launched from a fish shell opened after the render, not from a GUI.
+  `dot:mcp` падает, если какого-то `${VAR}` нет в SOPS.
+- **Секрет в HTTP-заголовке** — codex-адаптер APM пишет `${VAR}` в заголовки дословно. Для Codex добавь маппинг в `extra:` (`bearer_token_env_var` для `Authorization: Bearer`, `env_http_headers` для остальных заголовков) и экспортируй переменную для рантайма Codex строкой `set -gx VAR ${VAR}` в `$DOTFILES/modules/home/apm/config/mcp-secrets.fish.tmpl`. Codex увидит её только при запуске из fish-шелла, открытого после рендера, но не из GUI.
 
   ```yaml
     headers:
@@ -38,18 +38,18 @@ Entry under `dependencies.mcp`, always `registry: false`:
     extra:
       bearer_token_env_var: EXAMPLE_TOKEN
   ```
-- **OAuth server** — `url` only. APM does not log in: after install the user logs in once per provider, Claude `/mcp` → Authenticate, Codex `codex mcp login <name>`.
-- **Transport change** (stdio ↔ http) — first `claude mcp remove <name> -s user` and `codex mcp remove <name>`; otherwise APM merges the new fields into the old entry and the server fails to start.
-- **Removal** — delete the entry, apply, then remove any leftover from `claude mcp list` / `codex mcp list` with the same two commands.
+- **OAuth-сервер** — только `url`. APM вход не выполняет: после установки пользователь логинится один раз в каждом провайдере — в Claude `/mcp` → Authenticate, в Codex `codex mcp login <name>`.
+- **Смена транспорта** (stdio ↔ http) — сначала `claude mcp remove <name> -s user` и `codex mcp remove <name>`, иначе APM сольёт новые поля со старой записью и сервер не стартует.
+- **Удаление** — убери запись, примени, затем удали остаток из `claude mcp list` / `codex mcp list` теми же двумя командами.
 
-Apply in `$DOTFILES`, outside the sandbox, with `mise run dot:mcp`: it decrypts SOPS into the env of a single `apm install` and relinks `~/.apm/apm.lock.yaml` back into dotfiles. If `mcp-secrets.fish.tmpl` changed, run `mise run dot:link` instead: it renders the template without sudo and calls `dot:mcp` itself. Not `dot:rebuild`: it needs sudo and runs `git add -A` over the whole dirty tree. Check with `claude mcp get <name>` and `codex mcp list`. Tools appear only in sessions started after the install; tell the user to open a new one instead of looking for the tools in the current session.
+Применяй в `$DOTFILES`, вне песочницы, через `mise run dot:mcp`: он расшифровывает SOPS в env одного процесса `apm install` и возвращает ссылку `~/.apm/apm.lock.yaml` в dotfiles. Если менялся `mcp-secrets.fish.tmpl`, запускай вместо него `mise run dot:link`: он рендерит шаблон без sudo и сам вызывает `dot:mcp`. Не `dot:rebuild`: он требует sudo и делает `git add -A` по всему грязному дереву. Проверка — `claude mcp get <name>` и `codex mcp list`. Инструменты появляются только в сессиях, запущенных после установки: скажи пользователю открыть новую, а не ищи их в текущей.
 
-## Skill packages
+## Пакеты скилов
 
-`dependencies.apm` holds git deps (`git:`, `ref:`, optional `skills:` subset). Apply with `mise run dot:apm install`, never bare `apm install --global`: the wrapper keeps the lock linked into dotfiles.
+В `dependencies.apm` — git-зависимости (`git:`, `ref:`, опционально подмножество `skills:`). Применяй через `mise run dot:apm install`, никогда не голым `apm install --global`: обёртка держит lock слинкованным в dotfiles.
 
-Switching which package provides a skill of the same name needs the full `mise run dot:apm install`. A scoped `apm update <pkg>` deletes the old provider's files without deploying the newly unshadowed one, and the skill silently disappears.
+Смена пакета, который поставляет скил с тем же именем, требует полного `mise run dot:apm install`. Точечный `apm update <pkg>` удаляет файлы старого провайдера, но не разворачивает новый, ранее затенённый, и скил молча пропадает.
 
-## Commit
+## Коммит
 
-In `$DOTFILES`: `apm.yml`, `apm.lock.yaml`, plus `secrets.yaml` and `mcp-secrets.fish.tmpl` if touched.
+В `$DOTFILES`: `apm.yml`, `apm.lock.yaml`, а также `secrets.yaml` и `mcp-secrets.fish.tmpl`, если они менялись.
