@@ -75,11 +75,10 @@
 `services/powersync/secrets.yaml` до шифрования (шифрует человек, `sops services/powersync/secrets.yaml`):
 
 ```yaml
-powersync-env: |
-  POSTGRES_PASSWORD=<generated>
-  PS_DATA_SOURCE_URI=postgresql://vault:<generated>@postgres:5432/vault?sslmode=disable
-  PS_STORAGE_SOURCE_URI=postgresql://vault:<generated>@postgres:5432/powersync_storage?sslmode=disable
-  PS_ADMIN_TOKEN=<generated>
+POSTGRES_PASSWORD: "<generated>"
+PS_DATA_SOURCE_URI: "postgresql://vault:<generated>@postgres:5432/vault?sslmode=disable"
+PS_STORAGE_SOURCE_URI: "postgresql://vault:<generated>@postgres:5432/powersync_storage?sslmode=disable"
+PS_ADMIN_TOKEN: "<generated>"
 ```
 
 - Контейнер Postgres из compose апстрима не переносится: его рендерит `needs.postgres`, алиас в сети — `postgres`, приложение ждёт его healthcheck само.
@@ -127,5 +126,5 @@ powersync-env: |
 
 - UI закрыт `one_factor`, а `authRules` открывает `^/api` мобильному клиенту: API всё равно требует ключ Prowlarr.
 - `PROWLARR__AUTH__METHOD = "External"` выключает встроенный логин, вход проверяет Authelia; ключ API задаётся env из `secrets.env`.
-- Индексеры и download-клиент ведёт `tofu`: terranix-модуль `tofu.nix` с ресурсами провайдера `devopsarr/prowlarr`, адрес приложения приходит аргументом `appUrl`. `secrets` становятся переменными `sensitive`, `decypharr.API_TOKEN` берётся из `secrets.env` сервиса `decypharr`. В `secrets.yaml` нужен ещё `TOFU_STATE_PASSPHRASE` для шифрования state.
+- Индексеры и download-клиент ведёт `tofu`: terranix-модуль `tofu.nix` с ресурсами провайдера `devopsarr/prowlarr`, адрес приложения приходит аргументом `appUrl`. `secrets` становятся `locals` с `sensitive(file(...))` по путям секретов sops-nix, модуль ссылается на `local.<name>`; `decypharr.API_TOKEN` берётся из `secrets.env` сервиса `decypharr`. В `secrets.yaml` нужен ещё `TOFU_STATE_PASSPHRASE` для шифрования state.
 - Уже созданные в приложении объекты принимаются в state разовыми блоками `import` с ID из API, иначе первый apply создаст дубли.
