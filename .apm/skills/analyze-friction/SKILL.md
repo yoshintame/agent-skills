@@ -25,8 +25,10 @@ Violation коррелируется к команде по `tool_use_id` (`asse
 |---|---|
 | `fs-perm-denied` | `sandbox.filesystem.allowWrite` |
 | `net-refused` | `sandbox.network.allowedDomains` |
-| `proxy-incompleteread` / `tls-osstatus` | `sandbox.excludedCommands` |
+| `proxy-incompleteread` / `tls-osstatus` | per-call `dangerouslyDisableSandbox` |
 | tool-invocation (кривой cwd/флаг/повтор) | фикс скила, не конфиг |
+
+`sandbox.excludedCommands` как ось не предлагать — он no-op (совпавшая команда всё равно идёт в песочнице целиком, CC issue #89931); единственный рабочий выход из песочницы — per-call `dangerouslyDisableSandbox`.
 
 ## Вывод — вход для триажа, не авто-дифф
 
@@ -35,4 +37,4 @@ Violation коррелируется к команде по `tool_use_id` (`asse
   - `~/.ssh/**`, `~/.config/gh/**`, `~/.dotfiles/**/settings.json`, `~/.claude/**` — защита работает (expected-deny), не открывать.
   - `net-refused` на `localhost`/`127.0.0.1`/`0.0.0.0`/private-IP — сервис не поднят, не блок песочницы.
   - Сигнатура ≠ провал: успешный прогон (`vitest passed`, `bun add Saved lockfile`) несёт сигнатуру от `nice() failed` или под-варнинга и ложно попадает в violation.
-- `ps`/`lsof`/`nice` режет sandbox на syscall-уровне (как fs.watch) — только `excludedCommands`.
+- `ps`/`lsof`/`nice` режет sandbox на syscall-уровне (как fs.watch) — только per-call `dangerouslyDisableSandbox`.
