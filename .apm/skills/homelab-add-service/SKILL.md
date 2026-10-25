@@ -50,7 +50,7 @@ bun <skill-dir>/scripts/compose-to-homelab.ts --name <name> --compose <dir>/comp
 Правила ниже `nix flake check` не ловит:
 
 - Своё состояние — подкаталоги `/var/lib/<name>/<sub>`, по одному на назначение (`data`, `config`). Медиа, общие с другими сервисами, — под `config.homelab.media.root` (`/mnt/media/data`), `PUID`/`PGID` из `config.users.users.media`; в бэкап они сами не попадают.
-- Конфиг с секретами, которые приложение не читает из env, или файл, который приложение само переписывает, — `containers.<key>.configFiles` с дырками `${KEY}` и `${service.KEY}`, рендер на каждом старте. Файл без секретных дырок — `:ro` через `volumes`, иначе assertion.
+- Конфиг с секретами, которые приложение не читает из env, или файл, который приложение само переписывает, — `containers.<key>.configFiles` с дырками `${KEY}` и `${service.KEY}`: рендерит sops-nix, `preStart` копирует файл на каждом старте. Файл без секретов, который приложение не переписывает, — `:ro` через `volumes`.
 - Состояние внутри приложения (объекты его API: индексеры, клиенты, библиотеки) своим заданием или скриптом не настраивается. Есть OpenTofu-провайдер — поле `tofu` с модулем `services/<name>/tofu.nix` и пином провайдера в `modules/collectors/tofu/providers.nix`. Провайдера нет — это runtime-данные под бэкапом, первичная настройка руками и пунктом в отчёте.
 - Образы linuxserver и прочие на s6-overlay: пользователь через `PUID`/`PGID` в env, без `user` и `--init`.
 - `connectsTo`: к чужому контейнеру обращайся по полному имени `<target>-<key>`, короткий алиас `<key>` может совпасть со своим.
@@ -61,15 +61,15 @@ bun <skill-dir>/scripts/compose-to-homelab.ts --name <name> --compose <dir>/comp
 - `public = true` публикует только ingress cloudflared. CNAME `<subdomain>` на `<tunnelId>.cfargotunnel.com` (proxied) в Cloudflare создаёт человек, `tunnelId` — в `modules/infra/options.nix`.
 - Секреты: в файле только `secrets.env = ./secrets.yaml;`. Пароль Postgres не задавай в `needs.postgres.password`: `POSTGRES_PASSWORD` и строка подключения приложения с тем же паролем идут в тот же env. Значения в env без кавычек.
 
-Файл `secrets.yaml` шифрует человек: строка на каждый ключ из `report.secrets`, запуск из корня репо (правило sops и путь зависят от каталога), открытый текст на диск не пишется:
+Файл `secrets.yaml` шифрует человек: плоский YAML, ключ верхнего уровня на каждый ключ из `report.secrets`, значение — строка в двойных кавычках (число или `true` без кавычек станет нестроковым секретом и будет пропущено). Запуск из корня репо (правило sops и путь зависят от каталога), открытый текст на диск не пишется:
 
 ```fish
 set pg (openssl rand -hex 32); set admin (openssl rand -hex 16)
-printf '<name>-env: |\n  POSTGRES_PASSWORD=%s\n  DATABASE_URL=postgres://<user>:%s@postgres/<db>?sslmode=disable\n  ADMIN_PASSWORD=%s\n' $pg $pg $admin \
+printf 'POSTGRES_PASSWORD: "%s"\nDATABASE_URL: "postgres://<user>:%s@postgres/<db>?sslmode=disable"\nADMIN_PASSWORD: "%s"\n' $pg $pg $admin \
   | sops encrypt --filename-override services/<name>/secrets.yaml --output services/<name>/secrets.yaml
 ```
 
-Пока его нет, eval падает на `path … does not exist`. Для `nix flake check` до шифрования годится заглушка с фиктивными значениями той же раскладки: sops-nix проверяет файл только при сборке. В коммит идёт только зашифрованный файл.
+Пока его нет, eval падает на `path … does not exist`. Имена ключей eval читает из файла открытым текстом (namespace nix-stencil), поэтому незашифрованная заглушка не годится: в ней нет записей `ENC[…]`, и eval падает на `has no top-level KEY: ENC[...] string entries`. Для `nix flake check` до шифрования годится заглушка с теми же ключами вида `KEY: ENC[AES256_GCM,data:AA==,iv:AA==,tag:AA==,type:str]`: sops-nix проверяет сам файл только при сборке. В коммит идёт только зашифрованный файл.
 
 ## 5. Проверка
 
