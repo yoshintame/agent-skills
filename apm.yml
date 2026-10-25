@@ -1,5 +1,5 @@
 name: agent-skills
-version: 1.13.1
+version: 1.13.2
 description: Personal skills for Claude Code, Codex, and Cursor
 license: UNLICENSED
 targets: [claude, codex]
