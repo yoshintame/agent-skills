@@ -1,9 +1,9 @@
 ---
-name: git-ref
+name: git-review
 description: Open a commit set or range for review in Plannotator.
 ---
 
-# /git-ref
+# /git-review
 
 ## Target
 
@@ -19,10 +19,10 @@ description: Open a commit set or range for review in Plannotator.
 
 ## Open
 
-Run outside the sandbox (it writes `~/.cache/git-ref`, `~/.plannotator` and binds a loopback port). Always pass `-C`: cwd drifts between Bash calls.
+Run outside the sandbox (it writes `~/.cache/git-review`, `~/.plannotator` and binds a loopback port). Always pass `-C`: cwd drifts between Bash calls.
 
 ```bash
-bun <skill-dir>/scripts/git-ref.ts open -C <repo> <target>
+bun <skill-dir>/scripts/git-review.ts open -C <repo> <target>
 ```
 
 Output lines: `url:`, `review:` (review dir), `range:`, `stat:`, then `commit:` per commit or `source:` for a range. `reused: true` means a live server for the same target was returned as is.
@@ -32,7 +32,7 @@ Output lines: `url:`, `review:` (review dir), `range:`, `stat:`, then `commit:` 
 Then:
 
 1. `mcp__paseo__browser_new_tab` with the `url`. Without Paseo tools, give the URL as a markdown link.
-2. Start `bun <skill-dir>/scripts/git-ref.ts wait <review>` with `run_in_background`, outside the sandbox. It blocks until the user submits, prints the decision and removes the clone.
+2. Start `bun <skill-dir>/scripts/git-review.ts wait <review>` with `run_in_background`, outside the sandbox. It blocks until the user submits, prints the decision and removes the clone.
 3. Reply with one line: what is under review (`commit:` lines or the range) and the `stat:`.
 
 ## Feedback
@@ -44,7 +44,7 @@ Then:
 ## Notes
 
 - One-shot server: after Close or Approve the tab is dead. Another pass needs a new `open`.
-- "Open in editor" in Plannotator opens the clone under `~/.cache/git-ref`; edits there are lost. Edit the real repo.
-- To abandon a review without a decision: `git-ref.ts close <review>`. Reviews older than 7 days are killed and removed on the next `open`.
+- "Open in editor" in Plannotator opens the clone under `~/.cache/git-review`; edits there are lost. Edit the real repo.
+- To abandon a review without a decision: `git-review.ts close <review>`. Reviews older than 7 days are killed and removed on the next `open`.
 - The server is killed 30 minutes after `open`; `wait` then exits 1 with "review expired". Re-run the same `open` to continue.
 - `open` fails fast when `plannotator` is not on `PATH`.

@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-const script = resolve(import.meta.dir, '..', '.apm', 'skills', 'git-ref', 'scripts', 'git-ref.ts')
+const script = resolve(import.meta.dir, '..', '.apm', 'skills', 'git-review', 'scripts', 'git-review.ts')
 
 let root: string
 let repo: string
@@ -40,7 +40,7 @@ function field(out: string, name: string): string[] {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'git-ref-test-'))
+  root = mkdtempSync(join(tmpdir(), 'git-review-test-'))
   repo = join(root, 'repo')
   const bin = join(root, 'bin')
   mkdirSync(repo)
@@ -59,7 +59,7 @@ process.exit(0)
   env = {
     ...(process.env as Record<string, string>),
     PATH: `${bin}:${process.env.PATH}`,
-    GIT_REF_CACHE: join(root, 'cache'),
+    GIT_REVIEW_CACHE: join(root, 'cache'),
     GIT_CONFIG_GLOBAL: '/dev/null',
     GIT_AUTHOR_NAME: 't',
     GIT_AUTHOR_EMAIL: 't@t',

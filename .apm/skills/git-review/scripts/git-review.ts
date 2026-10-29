@@ -12,9 +12,9 @@ import { z } from 'zod@4.6.5'
 
 $.setPrintCommand(false)
 
-const cacheRoot = process.env.GIT_REF_CACHE ?? join(homedir(), '.cache', 'git-ref')
+const cacheRoot = process.env.GIT_REVIEW_CACHE ?? join(homedir(), '.cache', 'git-review')
 const staleMs = 7 * 24 * 60 * 60 * 1000
-const reviewTtlMs = Number(process.env.GIT_REF_TTL_MS ?? 30 * 60 * 1000)
+const reviewTtlMs = Number(process.env.GIT_REVIEW_TTL_MS ?? 30 * 60 * 1000)
 const startupTimeoutMs = 30_000
 const commitSlackMs = 3000
 const rangePattern = /^(.+?)(\.\.\.?)(.+)$/
@@ -61,7 +61,7 @@ interface CommitCall {
 }
 
 function fail(message: string): never {
-  process.stderr.write(`git-ref: ${message}\n`)
+  process.stderr.write(`git-review: ${message}\n`)
   process.exit(1)
 }
 
@@ -250,19 +250,19 @@ async function synthesize(clone: string, dir: string, commits: string[]): Promis
   const parent = await g(['rev-parse', `${commits[0]}^`])
   const date = await g(['show', '-s', '--format=%cI', commits[commits.length - 1]])
   const identity = {
-    GIT_AUTHOR_NAME: 'git-ref',
-    GIT_AUTHOR_EMAIL: 'git-ref@localhost',
+    GIT_AUTHOR_NAME: 'git-review',
+    GIT_AUTHOR_EMAIL: 'git-review@localhost',
     GIT_AUTHOR_DATE: date,
-    GIT_COMMITTER_NAME: 'git-ref',
-    GIT_COMMITTER_EMAIL: 'git-ref@localhost',
+    GIT_COMMITTER_NAME: 'git-review',
+    GIT_COMMITTER_EMAIL: 'git-review@localhost',
     GIT_COMMITTER_DATE: date,
   }
   const baseTree = await buildTree(clone, parent, new Map([...touchedBy].map(([f, cs]) => [f, `${cs[0]}^`])), join(dir, 'base.idx'))
   const headTree = await buildTree(clone, parent, new Map([...touchedBy].map(([f, cs]) => [f, cs[cs.length - 1]])), join(dir, 'head.idx'))
   const oneline = await g(['log', '--no-walk=unsorted', '--format=%h %s', ...commits])
   const commitTree = git(clone, identity)
-  const base = await commitTree(['commit-tree', baseTree, '-p', parent], 'git-ref review base\n')
-  const head = await commitTree(['commit-tree', headTree, '-p', base], `git-ref review: ${commits.length} commits\n\n${oneline}\n`)
+  const base = await commitTree(['commit-tree', baseTree, '-p', parent], 'git-review review base\n')
+  const head = await commitTree(['commit-tree', headTree, '-p', base], `git-review review: ${commits.length} commits\n\n${oneline}\n`)
   return { base, head, lines: [...lines(oneline).map((l) => `commit: ${l}`), ...(await interleaved(g, touchedBy, commits))] }
 }
 
@@ -337,7 +337,7 @@ function serve(bin: string, clone: string, dir: string, port: number): number {
 
 function expireAfter(pid: number, ms: number) {
   const script = 'sleep "$1"; ps -p "$2" -o comm= | grep -q plannotator && kill "$2"'
-  spawn('/bin/sh', ['-c', script, 'git-ref-expire', String(ms / 1000), String(pid)], { detached: true, stdio: 'ignore' }).unref()
+  spawn('/bin/sh', ['-c', script, 'git-review-expire', String(ms / 1000), String(pid)], { detached: true, stdio: 'ignore' }).unref()
 }
 
 async function waitForServer(state: State, dir: string) {
@@ -415,7 +415,7 @@ const close = defineCommand({
 
 runMain(
   defineCommand({
-    meta: { name: 'git-ref', description: 'Review a commit set or range in Plannotator via a synthetic checkout' },
+    meta: { name: 'git-review', description: 'Review a commit set or range in Plannotator via a synthetic checkout' },
     subCommands: { open, wait, close },
   }),
 )
