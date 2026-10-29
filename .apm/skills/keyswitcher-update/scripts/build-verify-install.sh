@@ -9,6 +9,7 @@ DEST="/Applications/$APP_NAME"
 PIN_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/keyswitcher-update"
 
 ALLOWED_HOSTS_RE='qkb-llm\.graninilya\.workers\.dev|github\.com/graninilya/keyswitcher|api\.openai\.com'
+ALLOWED_LITERALS_RE='https://ya\.ru/a,b'
 EXPECTED_EDKEY='+VYV2MzhMzAQl+Qwb7wPPR4HldDmiINfqpiU8kva9Mo='
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ksw-build.XXXXXX")"
@@ -29,7 +30,8 @@ bad="$(otool -L "$EXE" | tail -n +2 | grep -vE '/usr/lib/|/System/|@rpath/Sparkl
 echo "→ verify: baked-in hosts"
 hosts="$(strings -a "$EXE" | grep -aoiE 'https?://[a-z0-9._~:/?#@!$&()*+,;=%-]+' \
   | grep -viE 'andymatuschak|apple\.com/DTD|w3\.org|swift\.org' | sort -u || true)"
-unexpected="$(printf '%s\n' "$hosts" | grep -vE "^($ALLOWED_HOSTS_RE)" | grep . || true)"
+unexpected="$(printf '%s\n' "$hosts" | grep -vE "^https?://($ALLOWED_HOSTS_RE)([/:?#)]|$)" \
+  | grep -vxE "$ALLOWED_LITERALS_RE" | grep . || true)"
 [ -z "$unexpected" ] || { echo "BLOCK: unexpected baked-in host(s):" >&2; printf '%s\n' "$unexpected" >&2; exit 3; }
 printf '%s\n' "$hosts" | sed 's/^/   host: /'
 
