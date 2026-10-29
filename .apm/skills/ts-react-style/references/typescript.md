@@ -6,6 +6,20 @@
   or fix the actual type.
 - Prefer `interface` over `type` everywhere an interface can express it. `type`
   only for unions, intersections, tuples, mapped / conditional / utility types.
+- A function, closure or constructor whose object parameter has more than one
+  field gets that type as a separate `interface` right above it, named
+  `<Function>Input`. A single-field object stays inline; function-type members
+  of an interface (ports) keep their request literal inline.
+
+  ```ts
+  interface PrepareStateInput {
+    registry: Registry
+    capturedAt: string
+  }
+
+  export function prepareState({ registry, capturedAt }: PrepareStateInput) {}
+  ```
+
 - Type guards live in one shared `falsy` / `truthy` / `isX` module — no ad-hoc
   inline checks.
 

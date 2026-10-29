@@ -27,7 +27,7 @@ differ from default code generation.
 | Exports | named exports | `export default` |
 | Functions | top-level `function` declarations | top-level `const fn = () => {}` |
 | Callbacks | arrow functions for inline callbacks | wrapping inline callbacks in declarations |
-| Parameters | destructure in the signature | positional params + `.prop` access inside |
+| Parameters | destructure in the signature; an object of 2+ fields typed by a named `interface <Function>Input` right above the function | positional params + `.prop` access inside; an inline `{ a: A; b: B }` literal in the signature |
 | Comments | none — write self-documenting code; the only carve-outs: a one-line hint over a field of an exported shared type (autocomplete surface), and a one-line "why" at the exact spot of a non-derivable constraint (`biome-ignore`-shaped, ideally naming the spec that owns the full context) | inline / JSDoc / TODO comments unless asked; block comments that retell architecture or intent — that knowledge lives in the spec, and comments have no actualize process so they rot faster than the code they sit on |
 | Debug logs | `console.log({ value })` | `console.log(value)` |
 | Quotes / semicolons | single quotes, no semicolons | double quotes, trailing semicolons |
