@@ -7,6 +7,7 @@
 -- *_src(files) macros in bounded batches (see search.ts build()).
 SET preserve_insertion_order = false;
 SET threads = 3;
+SET memory_limit = '3GB';
 SET temp_directory = '/tmp/duckdb-cc-spill';
 
 CREATE OR REPLACE MACRO msg_src(pat) AS TABLE
