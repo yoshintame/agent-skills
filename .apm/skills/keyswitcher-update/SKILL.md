@@ -15,7 +15,7 @@ Run the scripts from this skill's directory. Builds need network (SPM fetches Sp
 
 2. **Get the diff.** `scripts/prepare-diff.sh <latest>` writes the diff and prints a red-flag hit list. That list is a starting point, not the whole audit.
 
-3. **Audit it.** Read `references/threat-model.md` — it holds the audited v0.2.6 baseline and the per-category red flags. Read every added line in context, cite `file:line` at the new tag, and classify clean / needs-review / block. Treat as **block until explained**: a new outbound host or `URLSession`; a new SPM dependency; a changed `SUPublicEDKey` or `SUFeedURL`; tap `options` no longer `.listenOnly`; a removed `IsSecureEventInputEnabled()` guard; a new `Process`/`NSTask`/`dlopen`; a new `LaunchDaemon`/`LaunchAgent`; a new CI secret or network call under `.github/`.
+3. **Audit it.** Read `references/threat-model.md` — it holds the audited baseline and the per-category red flags. Read every added line in context, cite `file:line` at the new tag, and classify clean / needs-review / block. Treat as **block until explained**: a new outbound host or `URLSession`; a new SPM dependency; a changed `SUPublicEDKey` or `SUFeedURL`; tap `options` no longer `.listenOnly`; a removed or weakened secure-input guard; a new `Process`/`NSTask`/`dlopen`; a new `LaunchDaemon`/`LaunchAgent`; a new CI secret or network call under `.github/`.
 
 4. **Report.** Give the user the verdict with evidence. If anything is block or needs-review, stop — do not build.
 
