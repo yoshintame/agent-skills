@@ -46,4 +46,5 @@ Then:
 - One-shot server: after Close or Approve the tab is dead. Another pass needs a new `open`.
 - "Open in editor" in Plannotator opens the clone under `~/.cache/git-ref`; edits there are lost. Edit the real repo.
 - To abandon a review without a decision: `git-ref.ts close <review>`. Reviews older than 7 days are killed and removed on the next `open`.
+- The server is killed 30 minutes after `open`; `wait` then exits 1 with "review expired". Re-run the same `open` to continue.
 - `open` fails fast when `plannotator` is not on `PATH`.

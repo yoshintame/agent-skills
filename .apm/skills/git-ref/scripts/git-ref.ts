@@ -14,6 +14,7 @@ $.setPrintCommand(false)
 
 const cacheRoot = process.env.GIT_REF_CACHE ?? join(homedir(), '.cache', 'git-ref')
 const staleMs = 7 * 24 * 60 * 60 * 1000
+const reviewTtlMs = Number(process.env.GIT_REF_TTL_MS ?? 30 * 60 * 1000)
 const startupTimeoutMs = 30_000
 const commitSlackMs = 3000
 const rangePattern = /^(.+?)(\.\.\.?)(.+)$/
@@ -334,6 +335,11 @@ function serve(bin: string, clone: string, dir: string, port: number): number {
   return child.pid ?? fail('failed to start plannotator')
 }
 
+function expireAfter(pid: number, ms: number) {
+  const script = 'sleep "$1"; ps -p "$2" -o comm= | grep -q plannotator && kill "$2"'
+  spawn('/bin/sh', ['-c', script, 'git-ref-expire', String(ms / 1000), String(pid)], { detached: true, stdio: 'ignore' }).unref()
+}
+
 async function waitForServer(state: State, dir: string) {
   const deadline = Date.now() + startupTimeoutMs
   while (!(await responds(state.url))) {
@@ -376,6 +382,7 @@ const open = defineCommand({
     const summary = [`url: ${url}`, `review: ${dir}`, `range: ${base}..${head}`, `stat: ${stat || 'no changes'}`, ...details]
     const state: State = { pid: serve(bin, clone, dir, port), url, summary, createdAt: Date.now() }
     writeFileSync(join(dir, 'state.json'), JSON.stringify(state))
+    expireAfter(state.pid, reviewTtlMs)
     await waitForServer(state, dir)
     process.stdout.write(`${summary.join('\n')}\n`)
   },
@@ -389,7 +396,9 @@ const wait = defineCommand({
   async run({ args }) {
     const state = readState(args.review) ?? fail(`no review state in ${args.review}`)
     while (isAlive(state.pid)) await Bun.sleep(1000)
-    const result = readResult(args.review) ?? fail(`plannotator exited without a decision; checkout kept at ${args.review}`)
+    const expired = Date.now() - state.createdAt >= reviewTtlMs
+    const reason = expired ? `review expired after ${reviewTtlMs / 60_000} minutes without a decision` : 'plannotator exited without a decision'
+    const result = readResult(args.review) ?? fail(`${reason}; checkout kept at ${args.review}`)
     process.stdout.write(`decision: ${result.decision}\n\n${result.message}\n`)
     removeReview(args.review)
   },
