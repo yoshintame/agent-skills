@@ -19,6 +19,6 @@ Baseline established by a full static audit of v0.2.6 (commit 7166f68), carried 
 
 Known baked-in URLs, matching the allowlist in `~/.config/desvio/keyswitcher/gates/verify.sh`: appcast and UI links under `github.com/graninilya/keyswitcher`, the worker URL, the `api.openai.com` placeholder text in `SettingsWindow.swift`, and `https://ya.ru/a,b` (typography self-test data in `SelfTest.swift`, never fetched).
 
-Accepted deviations in our own branches, reviewed once: `local-fixes` makes the smartConvert hotkey switch the input source while disabled or paused (`whenMuted: InputSourceSwitcher.toggle()`, no text read or typed). Anything beyond that is judged against the table.
+Accepted deviations in our own branches, reviewed once: `local-fixes` makes the smartConvert hotkey switch the input source with no replacement — when nothing is at the cursor, and while disabled, paused or in mode `.off` (`InputSourceSwitcher.toggle()`, among the user's enabled ru/en sources, no text read or typed) — and drops smartConvert's ⌘C probe, so only polish reads the clipboard. Anything beyond that is judged against the table.
 
 `desvio run diff` lists only added and removed lines matching these patterns, as `path:line` at the new tag (`+`) or the old one (`-`), and marks binary files without scanning them. Renames and logic changes inside existing functions do not show there — read the full diff.
