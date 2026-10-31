@@ -17,7 +17,7 @@ Patch to default Nix generation in the user's flakes (dotfiles, lasthaze-homelab
 | Many similar units | one data table, units derived from it with `lib.mapAttrs'` | near-identical unit literals; reading data back out of an argv list |
 | `ExecStart` from a list | `utils.escapeSystemdExecArgs [ … ]` — escapes `%` and `$` | `lib.escapeShellArgs` or hand-joined strings (`5%` is a systemd specifier) |
 | Binaries | `lib.getExe pkgs.curl`, `lib.getExe' pkgs.util-linux "flock"` | `"${pkgs.curl}/bin/curl"` |
-| Shared helpers and repo files | built once and handed to modules: `myLib` (dotfiles, `specialArgs` and flake-parts `_module.args`), `homelabLib` and `infraSecrets` (homelab `_module.args`) | `import ../../../lib/x.nix`, `../../secrets/infra.yaml` at varying depth, a second `import ./lib` |
+| Shared helpers and repo files | built once and handed to modules through `specialArgs` (`myLib` in dotfiles: hosts, Home Manager `extraSpecialArgs`, `mkFlake { specialArgs; }`); `_module.args` only in a module library whose flake does not own `specialArgs` (homelab `homelabLib`, `infraSecrets`, `stencil`), and only for values read in `config` — read in `imports` or `options` it recurses | `import ../../../lib/x.nix`, `../../secrets/infra.yaml` at varying depth, a second `import ./lib` |
 | Data of another host | `hosts/<host>/facts.nix`, imported once in the flake `let`, passed through `specialArgs` | `import ./facts.nix` inside a host, or a second import per consumer |
 | Formatting | `nix fmt` (treefmt: nixfmt-rfc-style, deadnix, statix) | formatting by hand |
 
