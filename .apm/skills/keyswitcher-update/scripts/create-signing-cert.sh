@@ -4,6 +4,7 @@
 # The cert is intentionally untrusted (Gatekeeper rejects it) — codesign still signs with
 # it, and a stable signature is all TCC needs to keep the grant. No trust step, no sudo.
 set -euo pipefail
+openssl version | grep -q '^OpenSSL 3' || { echo "need OpenSSL 3 on PATH (LibreSSL lacks -legacy)" >&2; exit 1; }
 NAME="keySwitcher Open Source"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
@@ -29,7 +30,7 @@ openssl pkcs12 -export -legacy -macalg sha1 \
   -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES \
   -inkey "$KEY" -in "$CRT" -name "$NAME" -out "$P12" -passout pass:"$PW"
 
-security import "$P12" -k "$KEYCHAIN" -P "$PW" -T /usr/bin/codesign -A
+security import "$P12" -k "$KEYCHAIN" -P "$PW" -T /usr/bin/codesign
 
 echo "--- verify ---"
 security find-identity -p codesigning | grep "$NAME"

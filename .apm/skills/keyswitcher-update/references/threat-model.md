@@ -1,28 +1,19 @@
 # KeySwitcher threat model
 
-Baseline established by a full static audit of v0.2.6 (commit 7166f68), carried forward by a diff audit to **v0.3.0 (commit 0a51fc2)**. A diff is clean only if it does not weaken any baseline below. Cite `file:line` at the new tag for every judgement.
+Baseline established by a full static audit of v0.2.6 (commit 7166f68), carried forward by diff audits to **v0.3.0 (commit 0a51fc2)**. A diff is clean only if it weakens no baseline below; any change in the right column blocks until explained. Cite `file:line` at the new tag for every judgement.
 
-## Audited baseline (v0.3.0)
+| Area | Audited baseline | Block until explained |
+|---|---|---|
+| Network | Egress only in `LLMPolisher.swift`, over its own ephemeral `URLSession` from `LLMTransport.swift` (no cache, recreated after two network errors). Targets: worker `https://qkb-llm.graninilya.workers.dev` (POST `{model, text}`, no auth), then each user-set `aiMirrorURLs` entry (empty by default), or a user-set OpenAI-compatible endpoint. Fires **only** from the `polishText` hotkey (`AppDelegate.polishText`). No other `URLSession` or socket. | A new `URLSession`, `URLRequest`, `URL(string:`, `NWConnection`; a new host; a send not gated behind an explicit user action; anything that makes `aiEnabled` send more. |
+| Update integrity | Sparkle. `SUFeedURL = https://github.com/graninilya/keyswitcher/releases/latest/download/appcast.xml`, `SUPublicEDKey = +VYV2MzhMzAQl+Qwb7wPPR4HldDmiINfqpiU8kva9Mo=`, updates EdDSA-verified against that key. | A changed `SUPublicEDKey` (rotation is high-risk; confirm the author did it on purpose), a `SUFeedURL` host change, anything that disables EdDSA verification. |
+| Capture | `CGEvent.tapCreate(..., options: .listenOnly, ...)`, mask `keyDown \| flagsChanged`. Password fields excluded via `SecureInput.isEnabled`: `IsSecureEventInputEnabled()` cached 150 ms, rechecked on Tab/Return, app activation and mouse clicks; buffer cleared on each secure-input transition (`KeystrokeBuffer.handle`); `SelectionDetector` AX reads skipped under secure input. | Tap `options` other than `.listenOnly`; new event types in the mask (`keyUp`, mouse content); a dropped or weakened secure-input guard (removed check, longer TTL, fewer rechecks). |
+| Storage and persistence | `UserDefaults` for settings, lowercased word sets, per-app rules and counters. Custom API key in Keychain (`KeychainStore`, service `com.granin.keyswitcher`), never exported. `History` is RAM-only. Settings export/import only through a user-picked file. Login item via `SMAppService.mainApp`, user-toggled. | Any file or DB write of keystrokes; writes outside `UserDefaults` and the app container; plaintext secrets; a new `LaunchDaemon`/`LaunchAgent`. |
+| Dependencies | One SPM dependency, `sparkle-project/Sparkle` (`from: "2.6.0"`); no `Package.resolved`. | A new `.package(` or `binaryTarget`, a changed Sparkle source or version source. |
+| Dynamic code | None in app sources: no `dlopen`, `dlsym`, `NSClassFromString`-for-exec, `Process`, `NSTask`, `system`, `popen`, `NSAppleScript` (the only `osascript` is in the DMG-layout build script). `--self-test` and `--test-injection` run local checks only. | Any of those added to app sources. |
+| Logging | User text goes through `Log.redact` (length and script mix only); plaintext only with the `QKBVerboseLogging` default. | A `privacy: .public` interpolation of raw user text. |
+| CI (`.github/`) | — | New secrets, new `curl` or network calls in `release.yml` or its scripts, a changed signing identity, steps that fetch and run extra code. |
+| Entitlements, `Info.plist` | — | A new entitlement, a sandbox change, a new usage-description string (camera, mic, contacts, full disk), a changed bundle id. |
 
-- **Network egress lives only in `LLMPolisher.swift`,** over its own ephemeral `URLSession` from `LLMTransport.swift` (no cache, recreated after two network errors). Paths: the default worker `https://qkb-llm.graninilya.workers.dev` (POST `{model, text}`, no auth), then each user-set `aiMirrorURLs` entry in order (empty by default), or an optional user-set OpenAI-compatible endpoint. All fire **only** from the `polishText` hotkey (`AppDelegate.polishText`). No other `URLSession`/socket.
-- **Update channel:** Sparkle. `SUFeedURL = https://github.com/graninilya/keyswitcher/releases/latest/download/appcast.xml`, `SUPublicEDKey = +VYV2MzhMzAQl+Qwb7wPPR4HldDmiINfqpiU8kva9Mo=`. Updates are EdDSA-verified against that key.
-- **Capture:** `CGEvent.tapCreate(..., options: .listenOnly, ...)`, event mask `keyDown | flagsChanged` only. Password fields are excluded through `SecureInput.isEnabled`: `IsSecureEventInputEnabled()` cached for 150 ms, forced to recheck on Tab/Return, app activation and mouse clicks; the buffer is fully cleared on each secure-input transition (`KeystrokeBuffer.handle`). AX selection reads (`SelectionDetector`) are skipped under secure input too.
-- **Storage:** `UserDefaults` for settings, lowercased wrong-layout word-sets, per-app rules and counters. The custom API key lives in Keychain (`KeychainStore`, service `com.granin.keyswitcher`) and is never exported. The replacement history (`History`) is RAM-only. No SQLite, no file-based keystroke log. Settings export/import goes only through a user-picked file.
-- **Persistence:** `SMAppService.mainApp` login item, user-toggled. No `LaunchDaemon`/`LaunchAgent`.
-- **Dependencies:** one SPM dep, official `sparkle-project/Sparkle` (`from: "2.6.0"`); no `Package.resolved`.
-- **No dynamic code in the app:** no `dlopen`/`dlsym`/`NSClassFromString`-for-exec/`Process`/`NSTask`/`system`/`popen`/`NSAppleScript` in app sources (the only `osascript` is in the DMG-layout build script). CLI flags `--self-test` and `--test-injection` run local checks only.
-- **Logging:** user text goes through `Log.redact` (length and script composition only); plaintext only with the `QKBVerboseLogging` default. Flag any `privacy: .public` interpolation of raw user text.
-- **Known baked-in literal:** `https://ya.ru/a,b` is typography self-test data (`SelfTest.swift`), never fetched.
+Known baked-in URLs, matching the allowlist in `~/.config/desvio/keyswitcher/verify.sh`: appcast and UI links under `github.com/graninilya/keyswitcher`, the worker URL, the `api.openai.com` placeholder text in `SettingsWindow.swift`, and `https://ya.ru/a,b` (typography self-test data in `SelfTest.swift`, never fetched).
 
-## Red flags per category (block until explained)
-
-- **Network:** any new `URLSession`/`URLRequest`/`URL(string:`/`NWConnection`; any new host or domain; any send not gated behind an explicit user action (auto-send of typed text); anything that makes `aiEnabled` exfiltrate more.
-- **Update integrity:** any change to `SUPublicEDKey` (key rotation — high-risk, confirm it is the author's intentional rotation before trusting), any `SUFeedURL` host change, anything disabling EdDSA verification.
-- **Capture:** tap `options` changed away from `.listenOnly`; new event types in the mask (`keyUp`, mouse content); removal or weakening of the secure-input guard (dropped `SecureInput` check, longer cache TTL, fewer forced rechecks).
-- **Storage / persistence:** any file or DB write of keystrokes; any new `LaunchDaemon`/`LaunchAgent`; writes outside `UserDefaults`/the app container; plaintext secrets.
-- **Dependencies:** any new `.package(` or `binaryTarget` (especially with a download URL); any change to Sparkle's source repo or version source.
-- **Dynamic code:** any `dlopen`/`dlsym`/`NSClassFromString`+`perform`/`Process`/`NSTask`/`system`/`popen`/`NSAppleScript` added to app sources.
-- **CI / `.github/`:** new secrets, new `curl`/network calls in `release.yml` or the scripts, changed signing identity, build steps that fetch and run extra code.
-- **Entitlements / `Info.plist`:** any new entitlement, sandbox change, new usage-description string implying a new capability (camera/mic/contacts/full-disk), or a changed bundle id.
-
-The script's grep hit list only covers added lines matching these patterns. Renames, deletions of a guard, and logic changes inside an existing function will not show there — read the full diff.
+`scripts/prepare-diff.sh` lists only added lines matching these patterns. Removed guards, renames and logic changes inside existing functions do not show there — read the full diff.

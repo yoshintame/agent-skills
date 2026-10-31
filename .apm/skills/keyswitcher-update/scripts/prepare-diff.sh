@@ -14,6 +14,7 @@ DIFF="$WORK/diff.patch"
 git -C "$WORK/repo" diff "$OLD".."$NEW" > "$DIFF"
 
 echo "range=$OLD..$NEW"
+echo "new_commit=$(git -C "$WORK/repo" rev-parse "$NEW^{commit}")"
 echo "diff=$DIFF"
 echo "repo=$WORK/repo"
 echo "--- changed files ---"

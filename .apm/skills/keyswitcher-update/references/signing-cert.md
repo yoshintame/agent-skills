@@ -10,7 +10,7 @@ The identity is intentionally **untrusted** (`CSSMERR_TP_NOT_TRUSTED` — Gateke
 scripts/create-signing-cert.sh
 ```
 
-Idempotent — skips if the identity already exists. It makes an RSA code-signing cert with `openssl`, exports a PKCS#12 in the legacy encoding macOS requires (`-legacy -macalg sha1 -keypbe/-certpbe PBE-SHA1-3DES`; OpenSSL 3 defaults fail `security import` with "MAC verification failed", and an empty p12 password is flaky), and imports it into the login keychain with `-T /usr/bin/codesign`. Touches the keychain, so run it with the sandbox off.
+Idempotent — skips if the identity already exists. It makes an RSA code-signing cert with `openssl`, exports a PKCS#12 in the legacy encoding macOS requires (`-legacy -macalg sha1 -keypbe/-certpbe PBE-SHA1-3DES`; OpenSSL 3 defaults fail `security import` with "MAC verification failed", and an empty p12 password is flaky), and imports it into the login keychain with `-T /usr/bin/codesign` only, so the first build asks once to allow `codesign` (choose Always Allow) and no other process can sign with the key silently. Needs OpenSSL 3 on `PATH` (LibreSSL has no `-legacy`). Touches the keychain, so run it with the sandbox off.
 
 ## Create it (Keychain Access GUI)
 
@@ -23,19 +23,3 @@ security find-identity -p codesigning | grep "keySwitcher Open Source"
 ```
 
 Once present, `App/build.sh` (run by the desvio build) signs with it instead of ad-hoc on every future build.
-
-## Lock the installed app now (no rebuild)
-
-To make an already-installed ad-hoc app cert-signed without rebuilding, re-sign it in place. Sparkle's nested code must be signed **inside-out** — `--deep` fails with `internal error in Code Signing subsystem` on `Sparkle.framework`:
-
-```sh
-ID="keySwitcher Open Source"; APP="/Applications/keySwitcher.app"
-V="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
-for t in "$V/XPCServices/Downloader.xpc" "$V/XPCServices/Installer.xpc" \
-         "$V/Updater.app" "$V/Autoupdate" "$V" "$APP"; do
-  codesign --force --sign "$ID" --timestamp=none "$t"
-done
-codesign --verify --deep --strict "$APP"
-```
-
-Writes to `/Applications` and reads the keychain key — run it with the sandbox off. The code identity changes once, so Accessibility is re-granted once on next launch, then the cert-based Designated Requirement (`certificate leaf = H"…"`) is stable across future rebuilds. An already-installed ad-hoc app otherwise keeps that signature until its next cert-signed rebuild.
