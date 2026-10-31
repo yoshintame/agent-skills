@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Build <tag> from source, verify it against the audited baseline, install to /Applications,
-# and record the pin. Exits non-zero (BLOCK) on any verification failure — caller must not install.
+# Build <audited-tag>, or a local patch <ref> on top of it, from source, verify it against the
+# audited baseline, install to /Applications, and record the pin. Exits non-zero (BLOCK) on any
+# verification failure — caller must not install.
 set -euo pipefail
-REPO="${KSW_REPO:-https://github.com/graninilya/keyswitcher}"
-REF="${1:?usage: [KSW_REPO=<path>] build-verify-install.sh <tag|branch>}"
+UPSTREAM="https://github.com/graninilya/keyswitcher"
+REPO="${KSW_REPO:-$UPSTREAM}"
+TAG="${1:?usage: [KSW_REPO=<path>] build-verify-install.sh <audited-tag> [<local-ref>]}"
+REF="${2:-$TAG}"
 APP_NAME="keySwitcher.app"
 DEST="/Applications/$APP_NAME"
 PIN_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/keyswitcher-update"
+PIN="$PIN_DIR/pinned.txt"
 
 ALLOWED_HOSTS_RE='qkb-llm\.graninilya\.workers\.dev|github\.com/graninilya/keyswitcher|api\.openai\.com'
 ALLOWED_LITERALS_RE='https://ya\.ru/a,b'
@@ -14,11 +18,28 @@ EXPECTED_EDKEY='+VYV2MzhMzAQl+Qwb7wPPR4HldDmiINfqpiU8kva9Mo='
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ksw-build.XXXXXX")"
 git clone --quiet "$REPO" "$WORK/repo"
-git -C "$WORK/repo" checkout --quiet "$REF"
+git -C "$WORK/repo" checkout --quiet "$REF" --
 COMMIT="$(git -C "$WORK/repo" rev-parse HEAD)"
-TAG="$(git -C "$WORK/repo" describe --tags --abbrev=0 --match 'v*' HEAD)"
-[ "$(git -C "$WORK/repo" rev-parse "$TAG^{commit}")" = "$COMMIT" ] || TAG="$TAG+local"
-echo "→ building $REF as $TAG ($COMMIT)"
+
+echo "→ verify: base tag $TAG matches upstream"
+TAG_COMMIT="$(git -C "$WORK/repo" rev-parse "$TAG^{commit}")"
+UPSTREAM_TAG_COMMIT="$(git ls-remote "$UPSTREAM" "refs/tags/$TAG" "refs/tags/$TAG^{}" | sort -k2 | tail -1 | cut -f1)"
+[ "$TAG_COMMIT" = "$UPSTREAM_TAG_COMMIT" ] || { echo "BLOCK: $TAG is $TAG_COMMIT here, ${UPSTREAM_TAG_COMMIT:-missing} upstream" >&2; exit 7; }
+git -C "$WORK/repo" merge-base --is-ancestor "$TAG" HEAD || { echo "BLOCK: $REF is not based on $TAG" >&2; exit 7; }
+
+pinned_base="$(awk 'NR==1{print $1}' "$PIN" 2>/dev/null || true)"
+if [ -n "$pinned_base" ] && [ "$pinned_base" != "$TAG" ]; then
+  echo "→ base moves $pinned_base → $TAG: valid only after a clean audit of that diff"
+fi
+
+LOCAL=""
+if [ "$COMMIT" != "$TAG_COMMIT" ]; then
+  LOCAL="$REF"
+  echo "→ local commits on top of $TAG (review them against the threat model):"
+  git -C "$WORK/repo" log --oneline "$TAG..HEAD" | sed 's/^/   /'
+fi
+
+echo "→ building $REPO @ $REF ($COMMIT)"
 "$WORK/repo/App/build.sh" release
 
 APP="$WORK/repo/App/dist/$APP_NAME"
@@ -41,12 +62,25 @@ echo "→ verify: Sparkle update key unchanged"
 edkey="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP/Contents/Info.plist" 2>/dev/null || true)"
 [ "$edkey" = "$EXPECTED_EDKEY" ] || { echo "BLOCK: SUPublicEDKey changed → $edkey" >&2; exit 4; }
 
+if [ -n "$LOCAL" ]; then
+  echo "→ verify: self-test of the built bundle"
+  "$EXE" --self-test || { echo "BLOCK: self-test failed" >&2; exit 5; }
+  if [ "$(defaults read com.granin.keyswitcher SUAutomaticallyUpdate 2>/dev/null || echo unset)" != "0" ]; then
+    echo "WARN: Sparkle auto-install is on and can replace this patched build:" >&2
+    echo "      defaults write com.granin.keyswitcher SUAutomaticallyUpdate -bool NO" >&2
+  fi
+fi
+
 echo "→ install → $DEST"
 was_running=false
 if pgrep -x keySwitcher >/dev/null; then
   was_running=true
   osascript -e 'tell application id "com.granin.keyswitcher" to quit'
   for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x keySwitcher >/dev/null || break; sleep 0.5; done
+  if pgrep -x keySwitcher >/dev/null; then
+    echo "BLOCK: keySwitcher did not quit; nothing installed" >&2
+    exit 6
+  fi
 fi
 [ -d "$DEST" ] && rm -rf "$DEST"
 cp -R "$APP" "$DEST"
@@ -54,7 +88,7 @@ xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 if $was_running; then open "$DEST"; fi
 
 mkdir -p "$PIN_DIR"
-printf '%s %s\n' "$TAG" "$COMMIT" > "$PIN_DIR/pinned.txt"
-echo "→ pinned: $TAG $COMMIT"
+printf '%s\n' "$TAG $COMMIT${LOCAL:+ $LOCAL}" > "$PIN"
+echo "→ pinned: $TAG $COMMIT${LOCAL:+ $LOCAL}"
 codesign -dv --verbose=2 "$DEST" 2>&1 | grep -iE 'Signature|TeamIdentifier' || true
-echo "✓ installed $TAG. If the signature is ad-hoc, re-grant Accessibility once."
+echo "✓ installed $TAG${LOCAL:+ + $LOCAL}. If the signature is ad-hoc, re-grant Accessibility once."
