@@ -16,4 +16,4 @@ Baseline established by a full static audit of v0.2.6 (commit 7166f68), carried 
 
 Known baked-in URLs, matching the allowlist in `~/.config/desvio/keyswitcher/gates/verify.sh`: appcast and UI links under `github.com/graninilya/keyswitcher`, the worker URL, the `api.openai.com` placeholder text in `SettingsWindow.swift`, and `https://ya.ru/a,b` (typography self-test data in `SelfTest.swift`, never fetched).
 
-`desvio run diff` lists only added and removed lines matching these patterns. Renames and logic changes inside existing functions do not show there — read the full diff.
+`desvio run diff` lists only added and removed lines matching these patterns, as `path:line` at the new tag (`+`) or the old one (`-`), and marks binary files without scanning them. Renames and logic changes inside existing functions do not show there — read the full diff.
