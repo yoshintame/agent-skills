@@ -6,6 +6,7 @@ REPO="https://github.com/graninilya/keyswitcher"
 NEW="${1:?usage: prepare-diff.sh <new_tag>}"
 PIN="${XDG_STATE_HOME:-$HOME/.local/state}/keyswitcher-update/pinned.txt"
 OLD="$(awk 'NR==1{print $1}' "$PIN" 2>/dev/null || true)"
+OLD="${OLD%+local}"
 OLD="${OLD:-v0.3.0}"   # last audited baseline (commit 0a51fc2) when no pin is recorded
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ksw-diff.XXXXXX")"

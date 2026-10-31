@@ -9,9 +9,10 @@ commit="$(awk 'NR==1{print $2}' "$PIN" 2>/dev/null || true)"
 latest="$(git ls-remote --tags --refs "$REPO" 'v*' | awk -F/ '{print $NF}' | sort -V | tail -1)"
 [ -n "$latest" ] || { echo "ERROR: no tags from $REPO" >&2; exit 1; }
 
+base="${current%+local}"
 newer=false
-if [ "$current" != "$latest" ] && \
-   [ "$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)" = "$latest" ]; then
+if [ "$base" != "$latest" ] && \
+   [ "$(printf '%s\n%s\n' "$base" "$latest" | sort -V | tail -1)" = "$latest" ]; then
   newer=true
 fi
 

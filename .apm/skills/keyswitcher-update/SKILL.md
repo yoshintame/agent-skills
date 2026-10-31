@@ -19,6 +19,18 @@ Run the scripts from this skill's directory. Builds need network (SPM fetches Sp
 
 4. **Report.** Give the user the verdict with evidence. If anything is block or needs-review, stop — do not build.
 
-5. **Build, verify, install** — only on a clean verdict and the user's explicit go-ahead: `scripts/build-verify-install.sh <latest>`. It builds via the repo's `App/build.sh`, blocks if `otool -L` shows a non-system dylib other than Sparkle, blocks on a baked-in host outside the allowlist or a changed `SUPublicEDKey`, installs to `/Applications`, and records the new pin.
+5. **Build, verify, install** — only on a clean verdict and the user's explicit go-ahead: `scripts/build-verify-install.sh <latest>`. It builds via the repo's `App/build.sh`, blocks if `otool -L` shows a non-system dylib other than Sparkle, blocks on a baked-in host outside the allowlist or a changed `SUPublicEDKey`, installs to `/Applications`, relaunches the app if it was running, and records the new pin. With local patches, install the rebased branch instead (below).
 
 6. **Close out.** Report the new pinned tag and commit. If the build was ad-hoc signed (no `keySwitcher Open Source` identity — see `references/signing-cert.md`), Accessibility has to be re-granted once.
+
+## Local patches
+
+Our own fixes live on branch `local-fixes` in `~/Development/graninilya/keyswitcher`, on top of the installed upstream tag; the pin then reads `<tag>+local`. `check-update.sh` and `prepare-diff.sh` strip `+local`, so steps 1–4 audit upstream tag to tag as usual.
+
+Before installing, build with `App/build.sh release` and run `App/dist/keySwitcher.app/Contents/MacOS/keySwitcher --self-test`. The self-test reads the live settings: a case failing on a word listed in `defaults read com.granin.keyswitcher ignoredAutoSwap` is the user's exception, not a regression.
+
+Install the branch with `KSW_REPO=$HOME/Development/graninilya/keyswitcher scripts/build-verify-install.sh local-fixes`. The script clones the repo, so only committed changes get built.
+
+On a new upstream release, after a clean audit run `git fetch --tags` and `git rebase <latest> local-fixes` in the work repo, drop patches upstream already fixed, rerun the self-test, and install the branch.
+
+Sparkle auto-install replaces the patched build with the author's binary; `defaults read com.granin.keyswitcher SUAutomaticallyUpdate` must print `0`.

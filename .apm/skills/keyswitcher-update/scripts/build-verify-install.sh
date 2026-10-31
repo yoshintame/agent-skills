@@ -2,8 +2,8 @@
 # Build <tag> from source, verify it against the audited baseline, install to /Applications,
 # and record the pin. Exits non-zero (BLOCK) on any verification failure — caller must not install.
 set -euo pipefail
-REPO="https://github.com/graninilya/keyswitcher"
-TAG="${1:?usage: build-verify-install.sh <tag>}"
+REPO="${KSW_REPO:-https://github.com/graninilya/keyswitcher}"
+REF="${1:?usage: [KSW_REPO=<path>] build-verify-install.sh <tag|branch>}"
 APP_NAME="keySwitcher.app"
 DEST="/Applications/$APP_NAME"
 PIN_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/keyswitcher-update"
@@ -14,9 +14,11 @@ EXPECTED_EDKEY='+VYV2MzhMzAQl+Qwb7wPPR4HldDmiINfqpiU8kva9Mo='
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ksw-build.XXXXXX")"
 git clone --quiet "$REPO" "$WORK/repo"
-git -C "$WORK/repo" checkout --quiet "$TAG"
+git -C "$WORK/repo" checkout --quiet "$REF"
 COMMIT="$(git -C "$WORK/repo" rev-parse HEAD)"
-echo "→ building $TAG ($COMMIT)"
+TAG="$(git -C "$WORK/repo" describe --tags --abbrev=0 --match 'v*' HEAD)"
+[ "$(git -C "$WORK/repo" rev-parse "$TAG^{commit}")" = "$COMMIT" ] || TAG="$TAG+local"
+echo "→ building $REF as $TAG ($COMMIT)"
 "$WORK/repo/App/build.sh" release
 
 APP="$WORK/repo/App/dist/$APP_NAME"
@@ -40,9 +42,16 @@ edkey="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP/Contents/Info.p
 [ "$edkey" = "$EXPECTED_EDKEY" ] || { echo "BLOCK: SUPublicEDKey changed → $edkey" >&2; exit 4; }
 
 echo "→ install → $DEST"
+was_running=false
+if pgrep -x keySwitcher >/dev/null; then
+  was_running=true
+  osascript -e 'tell application id "com.granin.keyswitcher" to quit'
+  for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x keySwitcher >/dev/null || break; sleep 0.5; done
+fi
 [ -d "$DEST" ] && rm -rf "$DEST"
 cp -R "$APP" "$DEST"
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+if $was_running; then open "$DEST"; fi
 
 mkdir -p "$PIN_DIR"
 printf '%s %s\n' "$TAG" "$COMMIT" > "$PIN_DIR/pinned.txt"
