@@ -14,6 +14,6 @@ Baseline established by a full static audit of v0.2.6 (commit 7166f68), carried 
 | CI (`.github/`) | — | New secrets, new `curl` or network calls in `release.yml` or its scripts, a changed signing identity, steps that fetch and run extra code. |
 | Entitlements, `Info.plist` | — | A new entitlement, a sandbox change, a new usage-description string (camera, mic, contacts, full disk), a changed bundle id. |
 
-Known baked-in URLs, matching the allowlist in `~/.config/desvio/keyswitcher/verify.sh`: appcast and UI links under `github.com/graninilya/keyswitcher`, the worker URL, the `api.openai.com` placeholder text in `SettingsWindow.swift`, and `https://ya.ru/a,b` (typography self-test data in `SelfTest.swift`, never fetched).
+Known baked-in URLs, matching the allowlist in `~/.config/desvio/keyswitcher/gates/verify.sh`: appcast and UI links under `github.com/graninilya/keyswitcher`, the worker URL, the `api.openai.com` placeholder text in `SettingsWindow.swift`, and `https://ya.ru/a,b` (typography self-test data in `SelfTest.swift`, never fetched).
 
-`scripts/prepare-diff.sh` lists only added lines matching these patterns. Removed guards, renames and logic changes inside existing functions do not show there — read the full diff.
+`desvio run diff` lists only added and removed lines matching these patterns. Renames and logic changes inside existing functions do not show there — read the full diff.
