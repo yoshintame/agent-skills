@@ -22,7 +22,7 @@ Keychain Access → **Certificate Assistant → Create a Certificate…**; name 
 security find-identity -p codesigning | grep "keySwitcher Open Source"
 ```
 
-Once present, `build-verify-install.sh` (via `build.sh`) signs with it instead of ad-hoc on every future build.
+Once present, `App/build.sh` (run by the desvio build) signs with it instead of ad-hoc on every future build.
 
 ## Lock the installed app now (no rebuild)
 
