@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Print the current pinned tag, the latest upstream tag, and whether an update exists.
+# Print the current pinned tag, the latest upstream tag, whether an update exists,
+# and every pinned patch branch that moved since the install.
 set -euo pipefail
 REPO="https://github.com/graninilya/keyswitcher"
 PIN="${XDG_STATE_HOME:-$HOME/.local/state}/keyswitcher-update/pinned.txt"
@@ -19,3 +20,12 @@ fi
 echo "current=${current:-<none>} ${commit:-}${local_ref:+ local=$local_ref}"
 echo "latest=$latest"
 echo "newer=$newer"
+
+WORK_REPO="$HOME/Development/graninilya/keyswitcher"
+IFS=, read -ra pinned_branches <<< "$local_ref"
+for entry in "${pinned_branches[@]}"; do
+  case "$entry" in *@*) ;; *) continue ;; esac
+  name="${entry%@*}"
+  now="$(git -C "$WORK_REPO" rev-parse --short "$name" 2>/dev/null || echo missing)"
+  [ "$now" = "${entry#*@}" ] || echo "branch-moved=$name ${entry#*@}..$now"
+done

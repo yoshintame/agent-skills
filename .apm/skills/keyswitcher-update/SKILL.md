@@ -11,7 +11,7 @@ Run the scripts from this skill's directory. Builds need network (SPM fetches Sp
 
 ## Steps
 
-1. **Check for an update.** `scripts/check-update.sh` prints `current`, `latest`, `newer`. If `newer=false`, report up-to-date and stop.
+1. **Check for an update.** `scripts/check-update.sh` prints `current`, `latest`, `newer`, and a `branch-moved=<branch> <old>..<new>` line per patch branch that changed since the install. With `newer=false` and no `branch-moved`, report up-to-date and stop. With only `branch-moved`, skip steps 2–4: review those branch commits against the threat model (Local patches), report, and on the user's go-ahead run step 5 without touching `audited-tag`.
 
 2. **Get the diff.** `scripts/prepare-diff.sh <latest>` writes the diff and prints a red-flag hit list. That list is a starting point, not the whole audit.
 
