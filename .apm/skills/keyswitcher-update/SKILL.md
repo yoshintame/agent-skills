@@ -15,7 +15,7 @@ k() { desvio --config ~/.config/desvio/keyswitcher/desvio.conf "$@"; }
 
 ## Steps
 
-1. **Check.** `k run check` prints `current`, `latest`, `newer`, then one line per patch branch that changed since the install: `branch-moved=<branch> <old>..<new>`, `branch-new=<branch>`, `branch-dropped=<branch>`. With `newer=false` and no branch lines, report up to date and stop. With only branch lines, skip to Local patches, then step 5 without `approve`.
+1. **Check.** `k run check` prints `current`, `latest`, `newer`, then one line per patch branch that changed since the install: `branch-moved=<branch> <old>..<new>`, `branch-new=<branch>`, `branch-dropped=<branch>`. With `newer=false` and no branch lines, report up to date and stop. With only branch lines, skip to Local patches, then step 5 without the release `approve`.
 
 2. **Diff.** `k run diff` (or `k run diff -- <tag>`) fetches tags into the build repo, blocks if the tag differs from upstream's, writes the diff, records the release as under audit, and prints `range`, `new_commit`, `diff`, the stat, then the lines matching red-flag patterns: `+ path:line: text` (line at the new tag), `- path:line: text` (line at the installed tag), `* path: binary, not scanned`. The hit list is a starting point, not the whole audit.
 
@@ -27,7 +27,8 @@ k() { desvio --config ~/.config/desvio/keyswitcher/desvio.conf "$@"; }
 
    ```bash
    k run approve        # the approval: writes audited-tag and audited-commit from the diff under audit
-   k build              # blocks unless the base is that tag at that commit, merges are plain, binary checks and --self-test pass
+   k run approve -- --branch <branch>   # each manifest branch, after its review (Local patches)
+   k build              # blocks unless the base is that tag at that commit, merges are plain and of reviewed branch tips, binary checks and --self-test pass
    k run install        # refuses an unverified tree; quits/relaunches the app, Sparkle auto-install off, writes the pin
    ```
 
@@ -37,4 +38,4 @@ k() { desvio --config ~/.config/desvio/keyswitcher/desvio.conf "$@"; }
 
 Our own fixes are the branches listed in `~/.config/desvio/keyswitcher/manifest.txt`, in the repo `~/Development/graninilya/keyswitcher`. desvio merges them into a throwaway `desvio` branch and never rewrites them. Conflict resolution is off (`DESVIO_AUTO_RESOLVE=0`) and the gate rejects any merge that differs from the automatic one, so a recorded rerere resolution cannot slip in. When a branch conflicts with a new tag: `k abort`, rebase that branch onto the tag, drop patches upstream already fixed, and build again.
 
-Before every install, review each manifest branch against `references/threat-model.md` the same way as an upstream diff: `k run diff -- --branch <branch>` writes and lists `<audited-tag>...<branch>` (three dots — only the branch's own changes) in the same format (`+` at the branch tip, `-` at its merge base with the audited tag) and records nothing for `approve`. The build prints those commits but does not judge them.
+Before every build, review each manifest branch against `references/threat-model.md` the same way as an upstream diff: `k run diff -- --branch <branch>` writes and lists `<audited-tag>...<branch>` (three dots — only the branch's own changes) in the same format (`+` at the branch tip, `-` at its merge base with the audited tag) and records the branch as under review. Report the verdict; only on a clean one and the user's go-ahead, `k run approve -- --branch <branch>` records `<branch> <commit> <audited-tag>` in `reviewed-branches`. The build blocks a merge of any branch tip without a review against its base, so a moved branch or a newly approved tag needs a fresh review.
