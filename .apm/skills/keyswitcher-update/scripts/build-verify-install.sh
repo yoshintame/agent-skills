@@ -65,10 +65,6 @@ edkey="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$APP/Contents/Info.p
 if [ -n "$LOCAL" ]; then
   echo "→ verify: self-test of the built bundle"
   "$EXE" --self-test || { echo "BLOCK: self-test failed" >&2; exit 5; }
-  if [ "$(defaults read com.granin.keyswitcher SUAutomaticallyUpdate 2>/dev/null || echo unset)" != "0" ]; then
-    echo "WARN: Sparkle auto-install is on and can replace this patched build:" >&2
-    echo "      defaults write com.granin.keyswitcher SUAutomaticallyUpdate -bool NO" >&2
-  fi
 fi
 
 echo "→ install → $DEST"
@@ -85,6 +81,8 @@ fi
 [ -d "$DEST" ] && rm -rf "$DEST"
 cp -R "$APP" "$DEST"
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
+defaults write com.granin.keyswitcher SUAutomaticallyUpdate -bool NO
+echo "→ Sparkle auto-install off (update checks stay on)"
 if $was_running; then open "$DEST"; fi
 
 mkdir -p "$PIN_DIR"

@@ -19,7 +19,7 @@ Run the scripts from this skill's directory. Builds need network (SPM fetches Sp
 
 4. **Report.** Give the user the verdict with evidence. If anything is block or needs-review, stop — do not build.
 
-5. **Build, verify, install** — only on a clean verdict and the user's explicit go-ahead: `scripts/build-verify-install.sh <latest>`. It builds via the repo's `App/build.sh`, blocks if the tag differs from upstream's, if `otool -L` shows a non-system dylib other than Sparkle, on a baked-in host outside the allowlist or a changed `SUPublicEDKey`, and if the running app does not quit. It installs to `/Applications`, relaunches the app if it was running, and records the new pin. With local patches, install the rebased branch instead (below).
+5. **Build, verify, install** — only on a clean verdict and the user's explicit go-ahead: `scripts/build-verify-install.sh <latest>`. It builds via the repo's `App/build.sh`, blocks if the tag differs from upstream's, if `otool -L` shows a non-system dylib other than Sparkle, on a baked-in host outside the allowlist or a changed `SUPublicEDKey`, and if the running app does not quit. It installs to `/Applications`, turns off Sparkle auto-install (`SUAutomaticallyUpdate`, so the author's binary cannot replace the audited build; update checks stay on), relaunches the app if it was running, and records the new pin. With local patches, install the rebased branch instead (below).
 
 6. **Close out.** Report the new pinned tag and commit. If the build was ad-hoc signed (no `keySwitcher Open Source` identity — see `references/signing-cert.md`), Accessibility has to be re-granted once.
 
@@ -32,5 +32,3 @@ Before every branch install, review `git diff <audited-tag>..local-fixes` agains
 Install with `KSW_REPO=$HOME/Development/graninilya/keyswitcher scripts/build-verify-install.sh <audited-tag> local-fixes`. The audited tag is an explicit argument: the script blocks if it differs from upstream's tag or is not an ancestor of the branch, and warns when it moves the pinned base. It clones the repo, so only committed changes are built, and it blocks on a failing `--self-test` of the built bundle.
 
 On a new upstream release, audit it first (steps 1–4), then `git fetch --tags` and `git rebase <latest> local-fixes` in the work repo, drop patches upstream already fixed, and install with `<latest>` as the audited tag. Rebasing onto an unaudited tag and installing would skip that release's audit.
-
-Sparkle auto-install replaces the patched build with the author's binary; the script warns while `SUAutomaticallyUpdate` is not `0`.
