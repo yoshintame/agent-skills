@@ -7,7 +7,7 @@ Never hand-roll transcription — no direct Deepgram/curl, no ad-hoc whisper. Th
 
 Vault root: `$OBSIDIAN_VAULT`, fallback `~/Documents/obsidian/yoshintame`.
 
-Argument: one or more recording file paths. One recording per meeting; the import uses the first media file it finds. Zoom calls recorded with CleanShot land in `~/Pictures/Screenshots` (`zoom.us Zoom Workplace on <Month> <DD> <YYYY> at <HH.MM.SS>.mp4`), not `~/Downloads` — when the user names a meeting by weekday, match that filename's date there.
+Argument: one or more recording file paths. One recording per meeting; the import uses the first media file it finds. Zoom calls recorded with CleanShot land in `~/Pictures/Screenshots` (`zoom.us Zoom <Meeting|Workplace> on <Month> <DD> <YYYY> at <HH.MM.SS>.mp4` — the window-title word varies), not `~/Downloads`; Telegram calls land there too as `Telegram Telegram @ Михаил on <Month> <DD> <YYYY> at <HH.MM.SS>.mp4`, where the name is the vault owner's, not the callee's — read the callee off the call window in an early frame (`ffmpeg -ss 25 -frames:v 1`). When the user names a meeting by weekday, match that filename's date there.
 
 ## Steps
 
@@ -32,10 +32,13 @@ Argument: one or more recording file paths. One recording per meeting; the impor
 4. **Run the import.** Do not `cd` into `_scripts` — `--cwd` makes bun load `_scripts/.env` (the `DEEPGRAM_API_KEY`) while you stay put:
 
    ```sh
+   export MP_CACHE_DIR="$TMPDIR/mp-cache"
    bun --cwd="$OBSIDIAN_VAULT/_scripts" "$OBSIDIAN_VAULT/_scripts/meeting-import.ts" "$OBSIDIAN_VAULT/events/meetings/<slug>"
    ```
 
-   Run it in the background — a 45-minute recording takes ~8 minutes end to end and a foreground call dies on the tool timeout. Transcription is only cached when `MP_CACHE_DIR` is set, so a run killed midway bills Deepgram again on retry.
+   Run it in the background — a 45-minute recording takes ~8 minutes end to end and a foreground call dies on the tool timeout. Transcription is only cached when `MP_CACHE_DIR` is set, so without it a failed or killed run bills Deepgram again on retry. The AI summary step sometimes exhausts its structured-output attempts and aborts the whole import (`[[summary-structured-output-drops-required-fields]]`); rerun the same command — with the cache set, the retry skips Deepgram.
+
+   Deepgram is not in the sandbox network allowlist, so a plain sandboxed run dies at transcription with `403 Connection blocked by network allowlist`. In auto mode, keep the sandbox and pass `allowed_domains: ["api.deepgram.com", "api.anthropic.com"]` — the whole pipeline, summary included, passes inside it. Outside auto mode `allowed_domains` is ignored; run with `dangerouslyDisableSandbox: true` instead. See `[[claude-sandbox-blocks-meeting-import]]`.
 
    The AI summary runs through the `claude-code` provider (Claude Max subscription, $0, no key). Never add `ANTHROPIC_API_KEY` to `_scripts/.env` — it trips the subscription guard.
 
