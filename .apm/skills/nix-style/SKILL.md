@@ -17,7 +17,7 @@ Patch to default Nix generation in the user's flakes (dotfiles, lasthaze-homelab
 | Many similar units | one data table, units derived from it with `lib.mapAttrs'` | near-identical unit literals; reading data back out of an argv list |
 | `ExecStart` from a list | `utils.escapeSystemdExecArgs [ … ]` — escapes `%` and `$` | `lib.escapeShellArgs` or hand-joined strings (`5%` is a systemd specifier) |
 | Binaries | `lib.getExe pkgs.curl`, `lib.getExe' pkgs.util-linux "flock"` | `"${pkgs.curl}/bin/curl"` |
-| Shared helpers and repo files | built once and handed to modules through `specialArgs` (`myLib` in dotfiles: hosts, Home Manager `extraSpecialArgs`, `mkFlake { specialArgs; }`); `_module.args` only in a module library whose flake does not own `specialArgs` (homelab `homelabLib`, `infraSecrets`, `stencil`), and only for values read in `config` — read in `imports` or `options` it recurses | `import ../../../lib/x.nix`, `../../secrets/infra.yaml` at varying depth, a second `import ./lib` |
+| Shared helpers and repo files | built once and handed to modules through `specialArgs` (`myLib` in dotfiles: hosts, Home Manager `extraSpecialArgs`, `mkFlake { specialArgs; }`); `_module.args` only in a module library whose flake does not own `specialArgs` (homelab `homelabLib`, `infraSecrets`, `stencilLib`), and never for a value that computes `imports` or the declaration of an option: that recurses, while a lazy use in `config` or in an option `default` works | `import ../../../lib/x.nix`, `../../secrets/infra.yaml` at varying depth, a second `import ./lib` |
 | Data of another host | `hosts/<host>/facts.nix`, imported once in the flake `let`, passed through `specialArgs` | `import ./facts.nix` inside a host, or a second import per consumer |
 | Formatting | `nix fmt` (treefmt: nixfmt-rfc-style, deadnix, statix) | formatting by hand |
 
@@ -40,9 +40,9 @@ Values the script needs go in `runtimeEnv` or arguments, not through string inte
 
 | Hole | Becomes |
 |---|---|
-| `${KEY}` | secret `KEY` of the file's namespace (`sopsFile`) |
-| `${ns.KEY}` | secret `KEY` of namespace `ns` |
-| `$${KEY}` | literal `${KEY}` |
+| `~{{key}}` | secret `key` of the file's `namespace` (by default the directory of its `sopsFile`) |
+| `~{{ns/key}}` | secret `key` of namespace `ns`, e.g. `~{{infra/restic-homelab-b2-key-id}}` |
+| `~~{{key}}` | literal `~{{key}}` |
 | `@var@` | Nix value from `vars`, camelCase name |
 
 ```nix
@@ -54,10 +54,14 @@ stencil.files."~/.config/resticprofile/homelab.env" = {
 services.foo.passwordFile = config.stencil.refs.app.API_TOKEN;
 ```
 
-- A hole that names a key missing from the sops file fails evaluation, not activation. A branch that adds a hole does not pass `nix flake check` until the user adds the key; the agent never creates or decrypts secrets.
-- Keys of a namespace file are `[A-Z_][A-Z0-9_]*` (`B2_KEY_ID`); a kebab-case key (`restic-homelab-b2-key-id`) is skipped with a warning, so a new sops file for stencil uses upper snake case.
+- A hole has no `{`, `}` or newline inside, and spaces belong to the key: `~{{ key }}` names ` key ` and fails as missing. A literal `~` right before a hole goes through a var: `@tilde@~{{key}}`.
+- A hole that names a key missing from the sops file fails evaluation, not activation. A branch that adds a hole does not pass `nix flake check` until the user adds the key; the agent never creates or decrypts secrets. `content` still evaluates then, with an internal unresolved marker: a test checks the template text or `path`, never that marker.
+- `${…}` is not a hole and stays as is, so shell, compose and JS text in a template needs no escape. The `{{` keeps betterleaks quiet on `PASSWORD=~{{key}}`; never add a betterleaks allowlist for holes.
+- A key is any string key of the sops file except one with `/` (sops-nix reads it as nesting), so an existing kebab-case file becomes a namespace without renaming keys; its refs are quoted: `config.stencil.refs.<ns>."some-key"`. Code that parses or prints a `key` / `ns/key` reference uses `parseRef` / `formatRef` from the nix-stencil `lib` (`stencilLib` in homelab), never its own regex or concatenation.
+- Declaring a namespace installs every key of its file as `<ns>/<key>`. Declare it where a template needs it — the file's own `sopsFile` and `namespace` — not globally; a module that still reads the same key through raw `sops.secrets` installs it twice until it moves to `stencil.refs`.
 - Values are inserted verbatim. A secret with quotes or backslashes goes by path through `stencil.refs`, not into a template.
-- `stencil.namespaces.<ns>.env.enable` gives an env file of every key of the namespace (`.env.path`).
+- `stencil.namespaces.<ns>.env.enable` gives an env file of every key of the namespace that is a variable name (`.env.path`); other keys stay out with a warning.
+- Nix code reads a rendered file through `stencil.files.<id>.path` or the option that exposes it. Set `name` only when something outside Nix, such as a runbook command, uses the old `/run/secrets/rendered/<name>` path of a replaced `sops.templates` entry.
 
 ## nix-link (dotfiles)
 
