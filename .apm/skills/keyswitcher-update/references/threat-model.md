@@ -21,4 +21,8 @@ Known baked-in URLs, matching the allowlist in `~/.config/desvio/keyswitcher/gat
 
 Accepted deviations in our own branches, reviewed once: `local-fixes` makes the smartConvert hotkey switch the input source with no replacement — when nothing is at the cursor, and while disabled, paused or in mode `.off` (`InputSourceSwitcher.toggle()`, among the user's enabled ru/en sources, no text read or typed) — and drops smartConvert's ⌘C probe, so only polish reads the clipboard. Anything beyond that is judged against the table.
 
+`local-fixes` also ships two CLI-only test modes in the release binary, reached only by their flag: `--typing-repro` drives the real buffer and converter against a screen model, switches the input source and restores the `UserDefaults` keys it changed; `--corpus-scan <in> <out>` runs the detector over a word list and writes the result to the path given. Neither posts events, opens the network or runs at normal launch.
+
+The baked-in hosts gate in `gates/verify.sh` reads `strings -a`, so it does not see URL literals short enough to be stored inline in code (about 15 bytes); it blocks any URL with userinfo (`@`) and any allowed host followed by something other than a port, `/`, `?`, `#` or `)`. Every added `https?://` line still has to be read in the diff.
+
 `desvio run diff` lists only added and removed lines matching these patterns, as `path:line` at the new tag (`+`) or the old one (`-`), and marks binary files without scanning them. Renames and logic changes inside existing functions do not show there — read the full diff.

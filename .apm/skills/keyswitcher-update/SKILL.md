@@ -29,7 +29,7 @@ k() { desvio --config ~/.config/desvio/keyswitcher/desvio.conf "$@"; }
    k run approve        # the approval: writes audited-tag and audited-commit from the diff under audit
    k run approve -- --branch <branch>   # each manifest branch, after its review (Local patches)
    k build              # blocks unless the base is that tag at that commit, merges are plain and of reviewed branch tips, binary checks and --self-test pass
-   k run install        # refuses an unverified tree; quits/relaunches the app, Sparkle auto-install off, writes the pin
+   k run install        # refuses a tree or bundle verify did not check; quits/relaunches the app, Sparkle auto-install off, pins what verify recorded
    ```
 
 6. **Close out.** Move the baseline in `references/threat-model.md` to the new tag. Report the pin (`<tag> <head> <branch@oid> tree=<hash>`). If the build was ad-hoc signed (no `keySwitcher Open Source` identity — see `references/signing-cert.md`), Accessibility has to be re-granted once.
