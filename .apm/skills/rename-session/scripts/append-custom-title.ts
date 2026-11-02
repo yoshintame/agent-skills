@@ -116,7 +116,7 @@ function runUncommittedGate(provider: ProviderSession, leaves: readonly string[]
   process.stderr.write(stdout)
   process.stderr.write(stderr)
   if (gate.exitCode === GATE_BLOCKING_EXIT) {
-    die('refusing done: the session left uncommitted changes above — commit or discard each, or pass --leave <abs-path>=<reason>')
+    die('refusing done: the session left uncommitted changes or unpushed commits above — commit, discard or push each, or pass --leave <abs-path>=<reason> / commit:<hash>=<reason>')
   }
   die(`uncommitted gate failed with exit ${gate.exitCode}`)
 }

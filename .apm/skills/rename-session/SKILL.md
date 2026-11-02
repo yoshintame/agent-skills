@@ -41,7 +41,7 @@ Run outside the project sandbox. The script selects exactly one backend from `CO
 
 Echo the script's stdout. If it exits non-zero, surface stderr verbatim and do not retry with a mutated name unless the user asks.
 
-`--status done` first runs the uncommitted gate (`session-status.ts --uncommitted`) and refuses with its `Blocking` list while a change this session made stays uncommitted. Pass `--leave <abs-path>=<reason>` (repeatable; `stash:<hash>=<reason>` for a stash) only for items `/done` already decided to leave; each is echoed as `left uncommitted:`. On refusal, go back to the gate step of `/done` — never add `--leave` just to get past it.
+`--status done` first runs the uncommitted gate (`session-status.ts --uncommitted`) and refuses with its `Blocking` list while a change this session made stays uncommitted or a commit it made is on no remote. Pass `--leave <abs-path>=<reason>` (repeatable; `stash:<hash>=<reason>` for a stash, `commit:<hash>=<reason>` for an unpushed commit) only for items `/done` already decided to leave; each is echoed as `left uncommitted:`. On refusal, go back to the gate step of `/done` — never add `--leave` just to get past it.
 
 ## Boundaries
 

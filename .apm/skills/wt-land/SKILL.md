@@ -17,6 +17,18 @@ Run this only when the user explicitly asked to merge or land a branch — never
 - Rebuild in the branch's worktree: `git switch --detach <base>`, per group `git cherry-pick -n <sha>…` and one `git commit`, then `git branch -f <branch> HEAD && git switch <branch>`. The final tree must equal the old tip's. A group that is a contiguous run of old commits must also match its last commit (`HEAD^{tree}` = `<last-sha>^{tree}`); a fixup folded across an unrelated commit breaks that match by design, so check those groups only by the final tree.
 - Already landed: `git reset --keep <merge>^1` in the primary, rebuild, land again; if the default branch is pushed, that is a force-push too and needs approval.
 
+## Check the default branch before landing
+
+Agents sometimes commit to the default branch in the primary and never push. Landing on top would carry those commits out with the next push, re-signed and unreviewed. Before `wt land`:
+
+```
+git -C <primary> fetch
+git -C <primary> log --format='%h %an %ad %s' --date=short @{u}..<default>
+```
+
+- Empty and the default branch is behind its upstream: `git -C <primary> merge --ff-only @{u}` first, so the land sits on the current remote tip.
+- Non-empty: these commits are not from the branch you are landing. List them to the user and ask whether they ship with this land, wait in a separate branch, or get dropped. Land only after the answer.
+
 ## Land
 
 - From the branch's worktree: `wt land` — the worktrunk alias expands to `git -C <primary> merge --no-ff <branch>`. Or run that `git merge --no-ff <branch>` in the primary yourself.

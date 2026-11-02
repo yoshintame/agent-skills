@@ -663,6 +663,20 @@ async function gitStashes(repo: string): Promise<Array<{ ref: string; hash: stri
   return out
 }
 
+async function gitUnpushed(repo: string): Promise<Array<{ hash: string; ms: number; refs: string; subject: string }>> {
+  const res = await $`git --no-optional-locks -C ${repo} log --branches --not --remotes --format=%H%x09%ct%x09%D%x09%s`
+    .noThrow()
+    .stdout("piped")
+    .stderr("null")
+  if (res.code !== 0) return []
+  const out: Array<{ hash: string; ms: number; refs: string; subject: string }> = []
+  for (const l of res.stdout.split("\n")) {
+    const [hash, ct, refs, subject] = l.split("\t")
+    if (hash && ct) out.push({ hash, ms: Number(ct) * 1000, refs: refs ?? "", subject: subject ?? "" })
+  }
+  return out
+}
+
 function changeMs(abs: string, isDir: boolean): number | null {
   if (isDir) {
     let max: number | null = null
@@ -709,10 +723,10 @@ function parseLeave(leaves: Map<string, string>, raw: string | undefined): void 
   const key = eq > 0 ? raw!.slice(0, eq).trim() : ""
   const reason = eq > 0 ? raw!.slice(eq + 1).trim() : ""
   if (!key || !reason) {
-    process.stderr.write(`--leave expects <abs-path>=<reason> or stash:<hash>=<reason>, got ${JSON.stringify(raw)}\n`)
+    process.stderr.write(`--leave expects <abs-path>=<reason>, stash:<hash>=<reason> or commit:<hash>=<reason>, got ${JSON.stringify(raw)}\n`)
     process.exit(1)
   }
-  if (key.startsWith("stash:")) {
+  if (key.startsWith("stash:") || key.startsWith("commit:")) {
     leaves.set(key, reason)
     return
   }
@@ -772,6 +786,9 @@ async function uncommitted(sessionIdArg: string | null, leaves: Map<string, stri
   const left: Array<Pending & { reason: string }> = []
   const info = new Map<string, string[]>()
   const repos = [...scope].sort()
+  const seenCommits = new Set<string>()
+  const prefixLeave = (prefix: string, hash: string) =>
+    [...leaves].find(([k]) => k.startsWith(prefix) && hash.startsWith(k.slice(prefix.length)))?.[1]
   for (const repo of repos) {
     for (const { xy, rel } of await gitDirty(repo)) {
       const isDir = rel.endsWith("/")
@@ -802,7 +819,20 @@ async function uncommitted(sessionIdArg: string | null, leaves: Map<string, stri
       const short = s.hash.slice(0, 12)
       const key = `stash:${short}`
       const item = { repo, label: `${key} \`${s.ref}: ${s.subject}\``, key, why: `bash \`${oneLine(hit.call.command)}\`` }
-      const reason = [...leaves].find(([k]) => k.startsWith("stash:") && s.hash.startsWith(k.slice(6)))?.[1]
+      const reason = prefixLeave("stash:", s.hash)
+      if (reason) left.push({ ...item, reason })
+      else blocking.push(item)
+    }
+    for (const c of await gitUnpushed(repo)) {
+      if (seenCommits.has(c.hash)) continue
+      const hit = callAt(repo, c.ms)
+      if (!hit) continue
+      seenCommits.add(c.hash)
+      const short = c.hash.slice(0, 12)
+      const key = `commit:${short}`
+      const refs = c.refs ? ` (${c.refs})` : ""
+      const item = { repo, label: `${key}${refs} \`${c.subject}\` — not on any remote`, key, why: `bash \`${oneLine(hit.call.command)}\`` }
+      const reason = prefixLeave("commit:", c.hash)
       if (reason) left.push({ ...item, reason })
       else blocking.push(item)
     }
@@ -810,7 +840,8 @@ async function uncommitted(sessionIdArg: string | null, leaves: Map<string, stri
 
   const known = new Set([...blocking, ...left].map((i) => i.key))
   for (const k of leaves.keys()) {
-    const matched = k.startsWith("stash:") ? [...known].some((x) => x.startsWith(k) || k.startsWith(x)) : known.has(k)
+    const matched =
+      k.startsWith("stash:") || k.startsWith("commit:") ? [...known].some((x) => x.startsWith(k) || k.startsWith(x)) : known.has(k)
     if (!matched) process.stderr.write(`warning: --leave ${k} matches no uncommitted session change\n`)
   }
 
@@ -830,10 +861,10 @@ async function uncommitted(sessionIdArg: string | null, leaves: Map<string, stri
   out += line(`Checked: ${new Date().toISOString()} · repos in scope: ${repos.length > 0 ? repos.map((r) => basename(r)).join(", ") : "(none)"}`)
   out += line()
   if (blocking.length > 0) {
-    out += line(`## Blocking (${blocking.length}) — dispose each: commit | discard | leave`)
+    out += line(`## Blocking (${blocking.length}) — dispose each: commit | discard | push | leave`)
     out += byRepo(blocking, (i) => `- ${i.label} — ${i.why}`)
   } else {
-    out += line("✓ Nothing blocking: every dirty change attributed to this session is committed, discarded or left.")
+    out += line("✓ Nothing blocking: every change attributed to this session is committed and pushed, discarded or left.")
   }
   if (left.length > 0) {
     out += line()
