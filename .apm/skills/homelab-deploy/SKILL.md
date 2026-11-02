@@ -44,7 +44,7 @@ just --justfile ~/Development/personal/lasthaze-homelab/justfile --list
 
 ## Push deploy — `just dev [action]`
 
-Dev-итерация без коммита: собирает из рабочего дерева Mac'а через `nixos-rebuild --override-input homelab path:.`, делегируя сборку на бокс через `--build-host`. Вывод отфильтрован — nix-шум (copying paths, списки .drv, warnings) подавлен; видны только diff, сообщения активации и Done.
+Dev-итерация без коммита: собирает из рабочего дерева Mac'а через `nixos-rebuild --override-input homelab "git+file://$PWD"`, делегируя сборку на бокс через `--build-host`. В store уходят только отслеживаемые файлы (с незакоммиченными правками), поэтому новый файл перед `just dev` — `git add -N`, иначе eval его не видит; dev-данные с отрендеренными секретами (`~/.local/state/homelab-dev`) в store не попадают. Вывод отфильтрован — nix-шум (copying paths, списки .drv, warnings) подавлен; видны только diff, сообщения активации и Done.
 
 Рецепт автоматически обходит **1Password store-ssh gotcha**: `nix run …nixos-rebuild` использует SSH из nix store, а 1Password привязывает подпись к пути бинарника → `Permission denied`. Рецепт открывает system-SSH ControlMaster и перенаправляет nixos-rebuild через него (`NIX_SSHOPTS`).
 
