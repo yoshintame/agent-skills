@@ -9,10 +9,10 @@ description: Диагностика тормозов Mac lasthaze-mbp.
 
 - `MEMORY` — `phys_footprint`, колонка «Память» в Activity Monitor, включая сжатую память. RSS из `ps` и `top -stats rsize` бывает меньше в разы, с ним не сверяй.
 - Процессы уже отнесены к приложению: helper'ы — к своему `.app` (`[Paseo]`), XPC-сервисы и WebKit-процессы — к ответственному приложению. Своё отнесение (`responsibility_get_pid_responsible_for_pid`, разбор путей `.app`) не пиши.
-- `(command)` — CLI-процессы, сгруппированные по `argv[0]`: `claude`, `node`, `esbuild`.
+- `(command)` — CLI-процессы, сгруппированные по имени бинаря: `claude`, `node`, `esbuild`.
 - Процессы root и других пользователей (`WindowServer`, `kernel_task`, `coreaudiod`) снимок читает только через `top`: таблица `Hidden processes by CPU` — без приложения, с памятью из `top`.
 - `Pressure normal` при сотнях МБ/с `decompress` или ненулевом `swapin` в строке `Paging` — всё равно нехватка памяти: уровень давления отстаёт.
-- `power_mw` в JSON на окне в секунды недостоверен, выводов по нему не делай.
+- `power_mw` в JSON на окне в секунды неровный: ядро обновляет счётчик энергии порциями. Мощность смотри в истории.
 
 Нет `mac-metrics` в PATH — модуль `mac-metrics` в dotfiles не применён, работай через CLI.
 
@@ -32,8 +32,8 @@ description: Диагностика тормозов Mac lasthaze-mbp.
 | троттлинг | `mac_thermal_pressure_level` (0 nominal, 1 moderate, 2 heavy) |
 | браузер по типам процессов | `mac_browser_memory_footprint_bytes{host="lasthaze-mbp"}`, метки `browser`, `process_type` |
 
-- `app="other"` — сумма мелких приложений. Своё имя приложение получает, как только хоть раз займёт 64 МиБ или 5% CPU; его счётчики идут с этого момента.
-- `mac_*_energy_joules_total` не сверены с реальной мощностью, выводов по ним не делай.
+- `app="other"` — сумма мелких приложений. Своя серия у приложения есть, пока оно в последние 10 минут хоть раз занимало 64 МиБ или 5% CPU; счётчики идут с этого момента.
+- `mac_*_energy_joules_total` — собственная энергия процессов (CPU и GPU, без экрана); `rate` по окну от минуты даёт ватты. До 2026-11-03 ряд писал чужую списанную энергию и занижен в десятки раз — его не сравнивай.
 - Процессов root (`WindowServer`, `kernel_task`) в истории нет.
 
 Пользователю дай ссылку на дашборд `https://grafana.yoshintame.space/d/mac` с диапазоном вокруг начала проблемы.
