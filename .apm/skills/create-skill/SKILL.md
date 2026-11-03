@@ -93,6 +93,9 @@ not a preamble.
 ## 6. Layout
 
 - Frontmatter holds only `name` and `description`.
+- A new skill, or one rewritten from scratch, is written in Russian: body and
+  `description`. Commands, API names, paths, flags and quoted output stay
+  verbatim. A partial edit keeps the file's existing language.
 - SKILL.md stays under 500 lines. Push depth into `references/` one level deep and
   link to it; don't inline it.
 - Folders: `scripts/` for code, `references/` for deep docs, `assets/` for templates.
