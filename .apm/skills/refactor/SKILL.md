@@ -36,6 +36,7 @@ Catalog of code smells repeatedly seen during refactor-pass sessions, with the c
 | 15 | Long-running deep-call pipeline with no `Effect.fn('name')` wrapper | Wrap entry-point service methods with `Effect.fn('Service.method')` for trace name + stack capture | see `/effect-ts` `references/services-and-layers.md` |
 | 16 | Repeated `runtime.runPromise(eff)` from a Promise-returning public API | Extract `runPublic(eff)` boundary helper | see `/effect-ts` `references/services-and-layers.md` |
 | 17 | Hand-rolled helper that duplicates ES2023+ / ES2024 stdlib (`Array.toSorted`, `Object.groupBy`, `Array.findLast`) | Use the stdlib — check `tsconfig.lib` is `ES2024+` first | inline |
+| 18 | Code that works around an existing shared layer: a hand-written query-state `match` beside the project's boundary component, a route that re-types the shared loader to reorder one call, a second helper next to the one already doing the job | Use the shared layer. If it lacks the case, extend it in its one place (an option, a fix to its matcher) instead of bypassing it. Before writing a loader / state switch / helper, grep for the existing one at that layer | inline |
 
 ## When NOT to refactor
 

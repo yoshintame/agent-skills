@@ -58,3 +58,12 @@ Don't write dense wall-of-statements bodies.
 - Only pure helpers (no closure capture) lift to module level below the export.
   A helper that needs the surrounding closure (a shared `Map` / `Ref`, captured
   config) stays inside that scope — see the Effect skill for service bodies.
+- Helpers of one domain live in one folder named after the domain, one file
+  per subject plus `index.ts`: `lib/actual-rates/{input,response,preview}.ts`.
+  Don't split one subject across sibling files by implementation fragment
+  (`actual-rate-entry.ts` + `actual-rates-form.ts` + `actual-rates.ts`, all
+  about the same entered value).
+- A function name says, in domain words, what comes back or what it does:
+  `getEnteredValueIn`, `getSavedSideEntry`, `getActualRatesSaveRequest`. A
+  shape-only name a reader can't decode without the body (`getEntryValue`,
+  `mapSideToFormData`) is wrong.
